@@ -1,0 +1,12 @@
+{
+  "name": "antigravity-custom-wallpaper",
+  "displayName": "Antigravity 星夜美化-mogu",
+  "description": "Antigravity 星夜美化-mogu：底部实时遥测三面板、任务进度条与 /goal、背景时钟，叠加运行中/未读对话雷达、原生双向汉化、星夜设置页、右侧曜石毛玻璃与一键复制。",
+  "version": "1.1.0",
+  "logo": "assets/logo.png",
+  "suggestedPrompts": [
+    "打开星夜美化设置（Alt+S）",
+    "查看当前会话的 Token 与上下文用量",
+    "定位当前运行中/未读的对话"
+  ]
+}

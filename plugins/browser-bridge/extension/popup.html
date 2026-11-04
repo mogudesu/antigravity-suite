@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>antigravity浏览器控制 · 谷谷嘎嘎</title>
+</head>
+<body>
+  <header>
+    <span id="dot" class="dot"></span>
+    <strong>antigravity浏览器控制</strong>
+    <span class="brand">谷谷嘎嘎</span>
+    <span id="browser" class="muted"></span>
+  </header>
+
+  <div id="state" class="state">正在读取状态…</div>
+
+  <label>桥接端口 <input id="port" type="number" min="1024" max="65535" /></label>
+  <label>访问令牌（可留空） <input id="token" type="text" placeholder="与 MCP 服务保持一致" /></label>
+  <label>搜索地址 <input id="search" type="text" /></label>
+  <label class="row"><input id="auto" type="checkbox" /> 自动连接并保持重连</label>
+
+  <div class="actions">
+    <button id="save">保存</button>
+    <button id="reconnect">重连</button>
+  </div>
+
+  <div id="detail" class="muted small"></div>
+
+  <footer class="muted small">
+    扩展把当前浏览器标签页暴露给本地 MCP 服务，服务由 Antigravity 启动。控制开始时会附加调试通道，由浏览器显示标准调试提示条，提示条首段为扩展名「谷谷嘎嘎正在控制你的浏览器」，并在页面内显示可见鼠标。提示条是浏览器原生控件，扩展无法改写其模板文案。
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>

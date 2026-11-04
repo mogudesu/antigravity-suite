@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "谷谷嘎嘎正在控制你的浏览器",
+  "version": "1.6.0",
+  "description": "把本机 Edge / Chrome 交给 Antigravity 的 MCP 服务驱动（CDP + 页面动作），保留登录态；控制页在用户窗口内以「谷谷嘎嘎控制中」标签组独立打开，常驻可见鼠标，不占用用户原标签页。",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "scripting",
+    "storage",
+    "alarms",
+    "tabGroups"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "谷谷嘎嘎正在控制你的浏览器 · antigravity浏览器控制",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "short_name": "谷谷嘎嘎"
+}

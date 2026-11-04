@@ -1,0 +1,22 @@
+{
+  "name": "antigravity-browser-bridge",
+  "version": "1.6.0",
+  "private": true,
+  "description": "MCP 服务 + MV3 扩展：谷谷嘎嘎直接控制本机 Edge / Chrome，保留登录态；控制期间由浏览器原生调试提示条显示「谷谷嘎嘎正在控制你的浏览器」，并显示页面鼠标。多会话 Leader/Follower 自动中继 + browser_launch。",
+  "main": "mcp-server/server.js",
+  "scripts": {
+    "start": "node mcp-server/server.js",
+    "test:bridge": "node scripts/self-test.cjs",
+    "test:relay": "node scripts/relay-test.cjs",
+    "test:dom": "python3 scripts/dom-test.py",
+    "test:banner": "python3 scripts/banner-test.py",
+    "test:banner:e2e": "python3 scripts/banner-e2e.py",
+    "test:e2e": "python3 scripts/e2e-test.py"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

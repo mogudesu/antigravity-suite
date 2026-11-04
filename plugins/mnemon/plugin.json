@@ -1,0 +1,25 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "mnemon",
+  "displayName": "antigravity长期记忆-mogu",
+  "version": "1.0.0",
+  "description": "Permanent persona and memory for Antigravity: a first-class PERSONA.md volume, resident USER.md/MEMORY.md, searchable memory spaces with pinned facts, project documents, atomic writes, dual-drive mirroring, verified daily gzip snapshots and startup self-healing.",
+  "logo": "assets/logo.png",
+  "suggestedPrompts": [
+    "Show my persona and what Mnemon remembers about this project",
+    "Remember permanently that I want Conventional Commits with a module scope",
+    "Run a memory health check and show the mirror and snapshot status"
+  ],
+  "author": {
+    "name": "Mnemon Contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "persona",
+    "context",
+    "recall",
+    "backup",
+    "mnemon"
+  ]
+}

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Bridge 测试页</title>
+</head>
+<body>
+  <h1>登录示例</h1>
+  <form id="f" onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'submitted:' + document.getElementById('username').value;">
+    <label for="username">用户名</label>
+    <input id="username" name="username" placeholder="请输入用户名" />
+    <label for="password">密码</label>
+    <input id="password" type="password" name="password" />
+    <label for="agree">同意条款</label>
+    <input id="agree" type="checkbox" />
+    <label for="city">城市</label>
+    <select id="city" name="city">
+      <option value="bj">北京</option>
+      <option value="sh">上海</option>
+      <option value="gz">广州</option>
+    </select>
+    <textarea id="note" placeholder="备注"></textarea>
+    <button id="submit" type="submit">登录</button>
+  </form>
+  <div id="out">未提交</div>
+  <div id="delayed"></div>
+  <div style="height: 2400px"></div>
+  <script>
+    setTimeout(function () {
+      document.getElementById('delayed').textContent = '延迟出现的内容';
+    }, 600);
+
+    // 模拟受控输入：在元素实例上装一个会吞掉直接赋值的 setter（React 的做法）
+    (function () {
+      var el = document.getElementById('username');
+      var protoDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      var swallowed = 0;
+      Object.defineProperty(el, 'value', {
+        configurable: true,
+        get: function () { return protoDesc.get.call(this); },
+        set: function () { swallowed++; window.__swallowed = swallowed; }
+      });
+      window.__swallowed = 0;
+      window.__events = { input: 0, change: 0 };
+      el.addEventListener('input', function () { window.__events.input++; });
+      el.addEventListener('change', function () { window.__events.change++; });
+    })();
+  </script>
+</body>
+</html>

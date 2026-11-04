@@ -1,0 +1,17 @@
+{
+  "computer-use-guard": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": ".*computer[-_]use.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -X utf8 ./scripts/hook_guard.py --policy ~/.gemini/memory/computer-use/policy.json --data-dir ~/.gemini/memory/computer-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

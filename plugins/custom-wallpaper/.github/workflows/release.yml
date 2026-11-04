@@ -1,0 +1,26 @@
+name: Release Starlight Plugin
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build zip and latest.json
+        run: node scripts/release.js --repo ${{ github.repository }} --notes "Release ${{ github.ref_name }}" --out dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/latest.json

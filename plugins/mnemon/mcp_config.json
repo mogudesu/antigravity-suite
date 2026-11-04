@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mnemon": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity长期记忆-mogu\\scripts\\mcp-server.mjs",
+        "--data-dir",
+        "C:\\Users\\25350\\.gemini\\memory\\mnemon-vault",
+        "--mirror-dir",
+        "C:\\Users\\25350\\Documents\\Antigravity-Memory-Backup"
+      ]
+    }
+  }
+}

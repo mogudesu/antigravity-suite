@@ -1,0 +1,33 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  width: 320px; margin: 0; padding: 14px;
+  font: 13px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+header { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; row-gap: 4px; margin-bottom: 10px; }
+header strong { font-size: 12.5px; white-space: nowrap; }
+.brand {
+  padding: 1px 7px; border-radius: 999px; font-size: 11px; line-height: 1.5;
+  color: #1e8e3e; background: rgba(30,142,62,.12); border: 1px solid rgba(30,142,62,.28);
+  flex: 0 0 auto;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa0a6; flex: 0 0 auto; }
+.dot.on { background: #1e8e3e; box-shadow: 0 0 0 3px rgba(30,142,62,.18); }
+.dot.off { background: #d93025; }
+.state { font-weight: 600; margin-bottom: 10px; }
+label { display: block; margin: 8px 0 2px; font-size: 12px; opacity: .8; }
+label.row { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+input[type=text], input[type=number] {
+  width: 100%; margin-top: 4px; padding: 5px 7px; border-radius: 6px;
+  border: 1px solid rgba(128,128,128,.45); background: transparent; color: inherit; font: inherit;
+}
+input[type=checkbox] { margin: 0; }
+.actions { display: flex; gap: 8px; margin: 14px 0 8px; }
+button {
+  flex: 1; padding: 7px 10px; border-radius: 6px; cursor: pointer; font: inherit;
+  border: 1px solid rgba(128,128,128,.45); background: rgba(128,128,128,.12); color: inherit;
+}
+button:hover { background: rgba(128,128,128,.22); }
+.muted { opacity: .65; }
+.small { font-size: 11px; line-height: 1.45; }
+footer { margin-top: 12px; border-top: 1px solid rgba(128,128,128,.25); padding-top: 8px; }

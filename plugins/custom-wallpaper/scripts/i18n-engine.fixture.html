@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Antigravity i18n fixture</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #12101f; color: #e8e4f7; }
+      .bg-sidebar { width: 260px; padding: 16px; border-right: 1px solid #2c2544; }
+      .panel { padding: 16px; }
+      button, a { margin: 4px; padding: 6px 10px; border-radius: 8px; border: 1px solid #3a3157; background: #1c1730; color: inherit; }
+      [data-markdown-root] { border: 1px dashed #4b3f6e; padding: 12px; margin-top: 12px; }
+      .markdown-alert-title { color: #c4b5fd; font-weight: 600; }
+      [contenteditable="true"] { border: 1px solid #4b3f6e; padding: 6px; }
+    </style>
+  </head>
+  <body>
+    <div data-testid="title-menu-bar" class="panel">
+      <span data-testid="title-menu-bar-item">Workspace</span>
+      <button>View</button>
+      <button>Window</button>
+    </div>
+
+    <aside class="bg-sidebar">
+      <a href="/customizations">Customizations</a>
+      <button data-testid="new-conversation-button">New Conversation</button>
+      <button data-testid="automations-button">Automations</button>
+
+      <div data-testid="project-header">
+        <span>MOGUProductionHub</span>
+        <button aria-label="Project options" data-testid="project-options">...</button>
+      </div>
+
+      <div data-testid="conversation-list-sidebar">
+        <div data-testid="conversation-row-sidebar" aria-label="Settings">
+          <span>Settings</span>
+          <span>10m</span>
+        </div>
+        <button data-testid="see-all">See all (17)</button>
+      </div>
+    </aside>
+
+    <main data-testid="conversation-view" class="panel">
+      <div data-testid="user-message-bubble">Please fix the Settings bug</div>
+
+      <div data-testid="commentable-content">
+        <div data-markdown-root>
+          <h1>Implementation Plan</h1>
+          <p>Settings will be updated by the agent.</p>
+          <div class="markdown-alert markdown-alert-important">
+            <p class="markdown-alert-title">
+              IMPORTANT
+            </p>
+            <p>Body paragraph must stay in English.</p>
+          </div>
+          <div class="markdown-alert markdown-alert-note">
+            <p class="markdown-alert-title">NOTE</p>
+          </div>
+          <pre><code>const Settings = { enabled: true };</code></pre>
+        </div>
+      </div>
+
+      <div data-testid="agent-input-box">
+        <div contenteditable="true">Settings</div>
+        <input
+          id="chat-input"
+          type="text"
+          value="Settings"
+          placeholder="Ask anything, @ to mention, / for actions"
+          aria-label="Message input"
+          data-testid="chat-input"
+        />
+      </div>
+    </main>
+
+    <section data-testid="artifact-view" class="panel">
+      <h2>Implementation Plan</h2>
+      <button id="copy-btn" aria-label="Copy" data-testid="copy-button" title="More actions">Copy</button>
+      <button data-testid="more-actions-overflow" aria-label="More actions">More actions</button>
+      <div class="monaco-editor"><span>Settings</span></div>
+      <svg width="20" height="20"><title>Settings</title><text>Settings</text></svg>
+      <textarea placeholder="Settings">Settings</textarea>
+      <kbd>Settings</kbd>
+      <span title="Terminal">Terminal</span>
+    </section>
+
+    <div data-testid="settings-modal" role="dialog" aria-label="Settings" class="panel">
+      <button role="tab">General</button>
+      <button>Appearance</button>
+    </div>
+  </body>
+</html>

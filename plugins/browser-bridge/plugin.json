@@ -1,0 +1,21 @@
+{
+  "name": "antigravity-browser-bridge",
+  "displayName": "antigravity浏览器控制（Edge / Chrome）",
+  "version": "1.6.0",
+  "description": "谷谷嘎嘎驱动的本地 MCP 浏览器桥：直接控制已登录的 Edge / Chrome。控制开始时附加 CDP，由浏览器原生调试提示条显示「谷谷嘎嘎正在控制你的浏览器」，并显示持续可见的页面鼠标；不再注入额外顶栏。多会话 Leader/Follower 自动中继，多开 Antigravity 窗口不再争抢 127.0.0.1:8767。",
+  "logo": "assets/logo.png",
+  "keywords": [
+    "browser",
+    "edge",
+    "chrome",
+    "mcp",
+    "automation",
+    "cdp",
+    "leader-follower"
+  ],
+  "suggestedPrompts": [
+    "启动 Edge 并用它打开 https://example.com",
+    "看看当前浏览器页面，帮我点开登录按钮",
+    "检查浏览器桥接状态，扩展没连上就告诉我怎么装"
+  ]
+}

@@ -1,0 +1,1746 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>星夜美化-mogu · 控制台</title>
+  <style>
+    :root {
+      --bg: #0a0816;
+      --panel: rgba(255, 255, 255, 0.032);
+      --border: rgba(255, 255, 255, 0.07);
+      --text: #f2edf9;
+      --sub: #9a90b0;
+      --muted: #6f6587;
+      --accent: #f6d893;
+      --accent-2: #c4b5fd;
+      --danger: #fca5a5;
+      --radius: 11px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    html, body {
+      min-height: 100%;
+    }
+
+    body {
+      background:
+        radial-gradient(120% 70% at 8% 0%, rgba(246, 216, 147, 0.06) 0%, transparent 55%),
+        radial-gradient(100% 60% at 92% 8%, rgba(167, 139, 250, 0.08) 0%, transparent 60%),
+        var(--bg);
+      color: var(--text);
+      padding: 14px;
+      font-size: 12.5px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .mark {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(246, 216, 147, 0.22);
+      border-radius: 9px;
+      background: linear-gradient(145deg, rgba(246, 216, 147, 0.12), rgba(167, 139, 250, 0.12));
+      color: var(--accent);
+      font-size: 14px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .header-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .title {
+      font-size: 13.5px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #f7f1e6;
+    }
+
+    .subtitle {
+      margin-top: 1px;
+      color: var(--muted);
+      font-size: 9px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #6ee7b7;
+      box-shadow: 0 0 8px rgba(110, 231, 183, 0.6);
+      flex: 0 0 7px;
+    }
+
+    .preview {
+      position: relative;
+      height: 152px;
+      margin-bottom: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #0d0a1c;
+      cursor: crosshair;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .preview-image {
+      position: absolute;
+      inset: 0;
+      background-size: cover;
+      background-position: 50% 26%;
+      background-repeat: no-repeat;
+      transition: opacity 120ms linear;
+    }
+
+    .preview-shade {
+      position: absolute;
+      inset: 0;
+      background: rgba(8, 6, 18, 0.42);
+      pointer-events: none;
+    }
+
+    .preview-grid {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-size: 33.33% 33.33%;
+    }
+
+    .focus-cross {
+      position: absolute;
+      left: 50%;
+      top: 26%;
+      width: 22px;
+      height: 22px;
+      margin: -11px 0 0 -11px;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 12px rgba(246, 216, 147, 0.5), inset 0 0 8px rgba(246, 216, 147, 0.2);
+      pointer-events: none;
+      transition: left 80ms linear, top 80ms linear;
+    }
+
+    .focus-cross::before,
+    .focus-cross::after {
+      content: "";
+      position: absolute;
+      background: var(--accent);
+      opacity: 0.8;
+    }
+
+    .focus-cross::before {
+      left: 50%;
+      top: -8px;
+      bottom: -8px;
+      width: 1px;
+      transform: translateX(-0.5px);
+    }
+
+    .focus-cross::after {
+      top: 50%;
+      left: -8px;
+      right: -8px;
+      height: 1px;
+      transform: translateY(-0.5px);
+    }
+
+    .preview-meta {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      left: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .tag {
+      padding: 2px 7px;
+      border: 1px solid rgba(246, 216, 147, 0.22);
+      border-radius: 999px;
+      background: rgba(12, 9, 24, 0.55);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      backdrop-filter: blur(8px);
+    }
+
+    .focus-readout {
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(12, 9, 24, 0.55);
+      color: #b8afcb;
+      font-size: 9px;
+      font-variant-numeric: tabular-nums;
+      backdrop-filter: blur(8px);
+    }
+
+    .glass-sample {
+      position: absolute;
+      top: 9px;
+      right: 9px;
+      width: 74px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(24px) saturate(150%);
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 8.5px;
+      letter-spacing: 0.08em;
+      pointer-events: none;
+    }
+
+    .card {
+      margin-bottom: 10px;
+      padding: 10px 11px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    }
+
+    .control + .control {
+      margin-top: 11px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.045);
+    }
+
+    .control-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+
+    .control-label {
+      color: #d8d0e7;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .control-value {
+      color: var(--accent);
+      font-size: 10.5px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .control-hint {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 9px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 16px;
+      margin: 0;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 3px;
+      border-radius: 2px;
+      background:
+        linear-gradient(90deg, var(--accent) 0%, var(--accent) var(--fill, 50%), rgba(255, 255, 255, 0.09) var(--fill, 50%), rgba(255, 255, 255, 0.09) 100%);
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 11px;
+      height: 11px;
+      margin-top: -4px;
+      border: 2px solid #0d0a1c;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(246, 216, 147, 0.45);
+    }
+
+    input[type="range"]:focus-visible {
+      outline: 1px solid rgba(246, 216, 147, 0.45);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    .palette-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .palette-title {
+      color: #d8d0e7;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .ghost-btn {
+      padding: 3px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      background: transparent;
+      color: #9a90b0;
+      font-size: 9.5px;
+      cursor: pointer;
+      transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+    }
+
+    .ghost-btn:hover {
+      border-color: rgba(246, 216, 147, 0.28);
+      background: rgba(246, 216, 147, 0.06);
+      color: var(--accent);
+    }
+
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .swatch {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      padding: 5px 6px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.018);
+    }
+
+    .swatch i {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 16px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 5px;
+      background: #131024;
+    }
+
+    .swatch span {
+      overflow: hidden;
+      color: #9389a9;
+      font-size: 8.5px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 8px;
+      color: #9a90b0;
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .toggle-row input {
+      width: 12px;
+      height: 12px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .engine-seg {
+      display: flex;
+      gap: 4px;
+      margin: 8px 0 10px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: rgba(8, 9, 18, 0.35);
+    }
+
+    .engine-seg button {
+      flex: 1;
+      height: 27px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--sub);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background-color 140ms ease, color 140ms ease;
+    }
+
+    .engine-seg button.is-active {
+      background: rgba(246, 216, 147, 0.13);
+      color: #f7e7c3;
+      box-shadow: inset 0 0 0 1px rgba(246, 216, 147, 0.2);
+    }
+
+    .font-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .font-card {
+      padding: 8px 9px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.02);
+      color: #9a90b0;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+    }
+
+    .font-card strong {
+      display: block;
+      color: #E8E1F4;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .font-card small {
+      display: block;
+      margin-top: 2px;
+      color: #7f7593;
+      font-size: 8px;
+      letter-spacing: 0.04em;
+    }
+
+    .font-card.is-active {
+      border-color: rgba(246, 216, 147, 0.42);
+      background: rgba(246, 216, 147, 0.06);
+      box-shadow: inset 0 0 0 1px rgba(246, 216, 147, 0.08);
+    }
+
+    .font-card[data-font="editorial-luxe"] strong {
+      font-family: "Cormorant Garamond", "Palatino Linotype", "华文中宋", serif;
+    }
+
+    .font-card[data-font="modern-silk"] strong {
+      font-family: "Plus Jakarta Sans", "Segoe UI Variable Display", sans-serif;
+    }
+
+    .font-card[data-font="literary-serif"] strong {
+      font-family: "Palatino Linotype", "Georgia", "华文中宋", serif;
+    }
+
+    .font-card[data-font="starry-game"] strong {
+      font-family: "jf open 粉圓 1.0", "Plus Jakarta Sans", "思源黑体 CN", sans-serif;
+    }
+
+    .star-modes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .star-mode {
+      padding: 7px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.02);
+      color: #9a90b0;
+      font-size: 9.5px;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+    }
+
+    .star-mode:hover {
+      color: #E8E1F4;
+      border-color: rgba(165, 180, 252, 0.22);
+    }
+
+    .star-mode.is-active {
+      color: var(--accent);
+      border-color: rgba(246, 216, 147, 0.4);
+      background: rgba(246, 216, 147, 0.06);
+    }
+
+    .actions {
+      display: flex;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    button {
+      font-family: inherit;
+    }
+
+    .action {
+      flex: 1;
+      height: 32px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 140ms ease, background-color 140ms ease, opacity 140ms ease;
+    }
+
+    .action:hover {
+      transform: translateY(-1px);
+    }
+
+    .action:active {
+      transform: translateY(0);
+    }
+
+    .action.primary {
+      border-color: rgba(246, 216, 147, 0.34);
+      background: linear-gradient(135deg, rgba(246, 216, 147, 0.22) 0%, rgba(167, 139, 250, 0.2) 100%);
+      color: #fff8eb;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    .action.secondary {
+      border-color: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.03);
+      color: #a99fbe;
+    }
+
+    .action:disabled {
+      opacity: 0.55;
+      cursor: default;
+      transform: none;
+    }
+
+    .footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 9px;
+    }
+
+    .upload {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border: 1px dashed rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      color: #8f85a4;
+      font-size: 9.5px;
+      cursor: pointer;
+      transition: color 140ms ease, border-color 140ms ease;
+    }
+
+    .upload:hover {
+      border-color: rgba(246, 216, 147, 0.3);
+      color: var(--accent);
+    }
+
+    .upload input {
+      display: none;
+    }
+
+    .hint {
+      min-width: 0;
+      overflow: hidden;
+      color: #6f6587;
+      font-size: 9px;
+      text-align: right;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .status {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.045);
+      color: #7f7595;
+      font-size: 9.5px;
+      min-height: 14px;
+    }
+
+    .status.is-error {
+      color: var(--danger);
+    }
+
+    .status.is-ok {
+      color: #86efac;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+      }
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin: 10px 0 12px;
+      padding: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .tab {
+      flex: 1;
+      height: 28px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: #8f85a4;
+      font-size: 10.5px;
+      cursor: pointer;
+      transition: background-color 140ms ease, color 140ms ease;
+    }
+
+    .tab:hover {
+      color: #E8E1F4;
+    }
+
+    .tab.is-active {
+      background: rgba(246, 216, 147, 0.10);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .tab-pane {
+      display: none;
+    }
+
+    .tab-pane.is-active {
+      display: block;
+    }
+
+    .memory-label {
+      display: block;
+      margin-top: 10px;
+      color: #9a90b0;
+      font-size: 9.5px;
+      letter-spacing: 0.04em;
+    }
+
+    .memory-textarea {
+      display: block;
+      width: 100%;
+      min-height: 112px;
+      margin-top: 5px;
+      padding: 9px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: rgba(8, 6, 18, 0.52);
+      color: #ddd7ea;
+      font-family: "Cascadia Code", "等距更紗黑體 TC", monospace;
+      font-size: 9.5px;
+      line-height: 1.55;
+      resize: vertical;
+    }
+
+    .memory-textarea:focus {
+      outline: none;
+      border-color: rgba(246, 216, 147, 0.38);
+    }
+
+    .memory-meta {
+      margin-top: 6px;
+      color: #7f7593;
+      font-size: 9px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .memory-items {
+      margin-top: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    .memory-item {
+      padding: 6px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.02);
+      color: #aaa0bd;
+      font-size: 9px;
+      line-height: 1.5;
+    }
+
+    .memory-item strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .control-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .control-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 8px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.02);
+      color: #9a90b0;
+      font-size: 9px;
+      line-height: 1.5;
+      word-break: break-all;
+    }
+
+    .control-row strong {
+      color: #E8E1F4;
+      font-weight: 600;
+    }
+
+    .control-row span:last-child {
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .control-pre {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 7px;
+      background: rgba(8, 6, 18, 0.4);
+      color: #8f85a4;
+      font-family: "Cascadia Code", monospace;
+      font-size: 8.5px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="mark">✦</div>
+    <div class="header-copy">
+      <div class="title">星夜美化-mogu</div>
+      <div class="subtitle">Starlight Obsidian · v1.0</div>
+    </div>
+    <span class="status-dot" id="statusDot" title="本地服务已连接"></span>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="控制台页签">
+    <button type="button" class="tab is-active" data-tab="visual" role="tab" aria-selected="true">视觉</button>
+    <button type="button" class="tab" data-tab="memory" role="tab" aria-selected="false">记忆</button>
+    <button type="button" class="tab" data-tab="control" role="tab" aria-selected="false">控制</button>
+  </nav>
+
+  <div id="paneVisual" class="tab-pane is-active" role="tabpanel">
+  <section class="preview" id="preview" aria-label="壁纸预览，拖动调整焦点">
+    <div class="preview-image" id="previewImage"></div>
+    <div class="preview-shade" id="previewShade"></div>
+    <div class="preview-grid"></div>
+    <div class="focus-cross" id="focusCross"></div>
+    <div class="glass-sample" id="glassSample">毛玻璃</div>
+    <div class="preview-meta">
+      <span class="tag">STARLIGHT v1.0</span>
+      <span class="focus-readout" id="focusReadout">焦点 50% · 26%</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="control">
+      <div class="control-head">
+        <span class="control-label">壁纸显隐度</span>
+        <span class="control-value" id="valOpacity">72%</span>
+      </div>
+      <input type="range" id="inputOpacity" min="0" max="100" step="1" value="72">
+    </div>
+
+    <div class="control">
+      <div class="control-head">
+        <span class="control-label">毛玻璃模糊度</span>
+        <span class="control-value" id="valBlur">24px</span>
+      </div>
+      <input type="range" id="inputBlur" min="0" max="40" step="1" value="24">
+      <div class="control-hint">作用于侧栏、额度卡与浮层玻璃</div>
+    </div>
+
+    <div class="control">
+      <div class="control-head">
+        <span class="control-label">暗角浓度</span>
+        <span class="control-value" id="valTint">42%</span>
+      </div>
+      <input type="range" id="inputTint" min="0" max="90" step="1" value="42">
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
+      <span class="palette-title">壁纸吸色</span>
+      <button type="button" class="ghost-btn" id="btnExtract">重新取色</button>
+    </div>
+    <div class="swatches">
+      <div class="swatch"><i id="swDark"></i><span>主暗色</span></div>
+      <div class="swatch"><i id="swHighlight"></i><span>高光</span></div>
+      <div class="swatch"><i id="swAccent"></i><span>点缀</span></div>
+    </div>
+    <label class="toggle-row"><input type="checkbox" id="autoPalette" checked> 跟随壁纸自动取色</label>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
+      <span class="palette-title">字体气质</span>
+    </div>
+    <div class="font-grid" id="fontGrid">
+      <button type="button" class="font-card is-active" data-font="editorial-luxe"><strong>星刊雅宋</strong><small>EDITORIAL LUXE</small></button>
+      <button type="button" class="font-card" data-font="modern-silk"><strong>现代几何</strong><small>MODERN SILK</small></button>
+      <button type="button" class="font-card" data-font="literary-serif"><strong>人文书卷</strong><small>LITERARY BOOK</small></button>
+      <button type="button" class="font-card" data-font="starry-game"><strong>星夜萌圆</strong><small>STARRY GAME</small></button>
+    </div>
+    <div class="control" style="margin-top: 10px">
+      <div class="control-head">
+        <span class="control-label">正文字号</span>
+        <span class="control-value" id="fontScaleLabel">100%</span>
+      </div>
+      <input type="range" id="inputFontScale" min="85" max="115" step="1" value="100">
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
+      <span class="palette-title">星辰空间</span>
+      <span class="control-value" id="starModeValue">星环全开</span>
+    </div>
+    <div class="star-modes" id="starModes">
+      <button type="button" class="star-mode is-active" data-mode="orbit-meteor">星环全开</button>
+      <button type="button" class="star-mode" data-mode="meteor-stars">流星微星</button>
+      <button type="button" class="star-mode" data-mode="minimal">极简静谧</button>
+      <button type="button" class="star-mode" data-mode="off">关闭</button>
+    </div>
+    <div class="control" style="margin-top: 10px">
+      <div class="control-head">
+        <span class="control-label">星效强度</span>
+        <span class="control-value" id="starIntensityLabel">85%</span>
+      </div>
+      <input type="range" id="inputStarIntensity" min="0" max="100" step="1" value="85">
+    </div>
+    <div class="control">
+      <div class="control-head">
+        <span class="control-label">流星频率</span>
+        <span class="control-value" id="meteorFrequencyLabel">60%</span>
+      </div>
+      <input type="range" id="inputMeteorFrequency" min="0" max="100" step="1" value="60">
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
+      <span class="palette-title">对话体验</span>
+    </div>
+    <label class="toggle-row"><input type="checkbox" id="promptSticky"> 提问吸顶（吸顶时压缩成一行）</label>
+    <div class="control-hint">默认关闭：提问随内容滚走。开启后当前提问会在顶部压缩为单行，减少对长回答的遮挡。</div>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
+      <span class="palette-title">星夜引擎</span>
+      <span class="control-value">实时同步</span>
+    </div>
+    <div class="engine-seg" id="engineLanguage">
+      <button type="button" data-lang="zh-CN" class="is-active">简体中文</button>
+      <button type="button" data-lang="en">English</button>
+    </div>
+    <label class="toggle-row"><input type="checkbox" id="deepI18n"> 功能窗口深度汉化</label>
+    <label class="toggle-row"><input type="checkbox" id="translateAlerts"> 文档提示框标题汉化（NOTE / IMPORTANT 等）</label>
+    <label class="toggle-row"><input type="checkbox" id="runningRadar"> 对话雷达（运行中 / 未读）</label>
+    <label class="toggle-row"><input type="checkbox" id="hideRadarWhenIdle"> 空闲时自动隐藏雷达条</label>
+    <label class="toggle-row"><input type="checkbox" id="quickCopyButton"> ⋮ 旁一键复制按钮</label>
+    <label class="toggle-row"><input type="checkbox" id="cursorParticles"> 鼠标星尘拖尾</label>
+    <label class="toggle-row"><input type="checkbox" id="questChime"> 任务完成星轨提示音</label>
+    <div class="control-hint">与内置「✦ 星夜美化」设置页共用同一份 config.json，任一入口修改后全局实时生效。</div>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
+      <span class="palette-title">底部遥测</span>
+      <span class="control-value">真实会话数据</span>
+    </div>
+    <label class="toggle-row"><input type="checkbox" id="telemetryBar"> 底部遥测三面板</label>
+    <label class="toggle-row"><input type="checkbox" id="telemetryShowCost"> Token 缓存省钱提示</label>
+    <label class="toggle-row"><input type="checkbox" id="taskProgressBar"> 输入框上方任务进度条</label>
+    <label class="toggle-row"><input type="checkbox" id="quickGoalPill"> ◎ 启动目标快捷胶囊</label>
+    <label class="toggle-row"><input type="checkbox" id="ambientClock"> 背景数字时钟水印</label>
+    <div class="control-hint">会话统计 / Token / 上下文三胶囊来自 GeneratorMetadata 与 Steps；任务条来自当前会话 task.md。</div>
+  </section>
+
+  <div class="actions">
+    <button type="button" class="action primary" id="btnApply">✦ 应用到 Antigravity</button>
+    <button type="button" class="action secondary" id="btnRestore">↩ 还原纯色</button>
+  </div>
+
+  <div class="footer-row">
+    <label class="upload">
+      <input type="file" id="wallpaperFile" accept="image/png,image/jpeg,image/webp">
+      更换壁纸图片
+    </label>
+    <span class="hint">拖动准星调整壁纸焦点</span>
+  </div>
+
+  <div class="status" id="status">已连接本地壁纸服务</div>
+  </div>
+
+  <div id="paneMemory" class="tab-pane" role="tabpanel">
+    <section class="card">
+      <div class="palette-head">
+        <span class="palette-title">永久记忆与人设</span>
+        <button type="button" class="ghost-btn" id="btnMemoryRefresh">刷新</button>
+      </div>
+      <div class="memory-meta" id="memoryMeta">尚未加载</div>
+      <label class="memory-label" for="memoryPersona">AI 人设 · PERSONA.md</label>
+      <textarea id="memoryPersona" class="memory-textarea" spellcheck="false" placeholder="定义 AI 的名字、角色设定、沟通语气与禁忌"></textarea>
+      <label class="memory-label" for="memoryUser">用户画像 · USER.md</label>
+      <textarea id="memoryUser" class="memory-textarea" spellcheck="false" placeholder="技术栈、习惯与审美偏好"></textarea>
+      <label class="memory-label" for="memoryMemory">常驻工作记忆 · MEMORY.md</label>
+      <textarea id="memoryMemory" class="memory-textarea" spellcheck="false" placeholder="跨项目关键架构约定与长期目标"></textarea>
+      <div class="actions">
+        <button type="button" class="action primary" id="btnMemorySave">保存并镜像</button>
+        <button type="button" class="action secondary" id="btnMemoryBackup">立即备份</button>
+      </div>
+      <div class="status" id="memoryStatus">尚未加载</div>
+    </section>
+    <section class="card">
+      <div class="palette-head">
+        <span class="palette-title">记忆条目（只读）</span>
+        <button type="button" class="ghost-btn" id="btnMemoryItems">刷新</button>
+      </div>
+      <div class="memory-items" id="memoryItems"><div class="memory-item">点击刷新读取 memories.jsonl</div></div>
+    </section>
+    <div class="control-hint">保存会原子写入主库并复制到 Antigravity-Memory-Backup\\latest\\runtime；立即备份会调用 mnemon mirror 生成镜像与每日快照。</div>
+  </div>
+
+  <div id="paneControl" class="tab-pane" role="tabpanel">
+    <section class="card">
+      <div class="palette-head">
+        <span class="palette-title">电脑控制 · computer-use</span>
+        <button type="button" class="ghost-btn" id="btnControlRefresh">刷新</button>
+      </div>
+      <div class="control-list" id="controlComputer"><div class="control-row">尚未加载</div></div>
+    </section>
+    <section class="card">
+      <div class="palette-head">
+        <span class="palette-title">浏览器桥 · Edge 优先</span>
+      </div>
+      <div class="control-list" id="controlBrowser"><div class="control-row">尚未加载</div></div>
+      <div class="control-pre" id="controlBridgeHint">安装扩展后，浏览器桥会接管 8767 端口。</div>
+    </section>
+    <div class="status" id="controlStatus">尚未加载</div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const state = {
+      opacity: 0.72,
+      blur: 24,
+      darkTint: 0.42,
+      focusX: 50,
+      focusY: 26,
+      autoPalette: true,
+      promptSticky: false,
+      language: 'zh-CN',
+      deepI18n: true,
+      translateAlerts: true,
+      runningRadar: true,
+      hideRadarWhenIdle: false,
+      quickCopyButton: true,
+      cursorParticles: true,
+      questChime: false,
+      telemetryBar: true,
+      telemetryShowCost: true,
+      taskProgressBar: true,
+      quickGoalPill: false,
+      ambientClock: false,
+      fontPreset: 'editorial-luxe',
+      fontScale: 1,
+      starEffectMode: 'orbit-meteor',
+      starIntensity: 0.85,
+      meteorFrequency: 0.6,
+      palette: {
+        dark: '#120f26',
+        highlight: '#c4b5fd',
+        accent: '#f6d893',
+        cool: '#7dd3fc'
+      },
+      wallpaperUrl: '/wallpaper'
+    };
+
+    let liveTimer = 0;
+    let saveTimer = 0;
+    let pendingLive = false;
+    let dragging = false;
+    let previewImage = null;
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function setStatus(message, kind) {
+      const node = $('status');
+      node.textContent = message;
+      node.classList.toggle('is-error', kind === 'error');
+      node.classList.toggle('is-ok', kind === 'ok');
+    }
+
+    function setFill(input) {
+      const min = Number(input.min || 0);
+      const max = Number(input.max || 100);
+      const value = Number(input.value);
+      const percent = max === min ? 0 : ((value - min) / (max - min)) * 100;
+      input.style.setProperty('--fill', percent + '%');
+    }
+
+    function applyPaletteToPanel(palette) {
+      const accent = palette && /^#[0-9a-f]{6}$/i.test(palette.accent || '') ? palette.accent : '#f6d893';
+      const alt = palette && /^#[0-9a-f]{6}$/i.test(palette.highlight || '') ? palette.highlight : '#c4b5fd';
+      document.documentElement.style.setProperty('--accent', accent);
+      document.documentElement.style.setProperty('--accent-2', alt);
+      $('swDark').style.background = palette?.dark || '#120f26';
+      $('swHighlight').style.background = palette?.highlight || '#c4b5fd';
+      $('swAccent').style.background = palette?.accent || '#f6d893';
+    }
+
+    function renderPreview() {
+      const image = $('previewImage');
+      image.style.opacity = String(clamp(state.opacity, 0, 1));
+      image.style.backgroundPosition = state.focusX + '% ' + state.focusY + '%';
+      $('previewShade').style.background = 'rgba(8, 6, 18, ' + clamp(state.darkTint, 0, 0.92) + ')';
+      $('focusCross').style.left = state.focusX + '%';
+      $('focusCross').style.top = state.focusY + '%';
+      $('focusReadout').textContent = '焦点 ' + Math.round(state.focusX) + '% · ' + Math.round(state.focusY) + '%';
+      $('glassSample').style.backdropFilter = 'blur(' + state.blur + 'px) saturate(150%)';
+      $('glassSample').style.webkitBackdropFilter = 'blur(' + state.blur + 'px) saturate(150%)';
+    }
+
+    function renderControls() {
+      const opacity = Math.round(state.opacity * 100);
+      const tint = Math.round(state.darkTint * 100);
+      $('inputOpacity').value = String(opacity);
+      $('inputBlur').value = String(Math.round(state.blur));
+      $('inputTint').value = String(tint);
+      $('valOpacity').textContent = opacity + '%';
+      $('valBlur').textContent = Math.round(state.blur) + 'px';
+      $('valTint').textContent = tint + '%';
+      $('autoPalette').checked = Boolean(state.autoPalette);
+      $('promptSticky').checked = Boolean(state.promptSticky);
+      ['deepI18n', 'translateAlerts', 'runningRadar', 'hideRadarWhenIdle', 'quickCopyButton', 'cursorParticles', 'questChime',
+        'telemetryBar', 'telemetryShowCost', 'taskProgressBar', 'quickGoalPill', 'ambientClock'].forEach((key) => {
+        $(key).checked = Boolean(state[key]);
+      });
+      document.querySelectorAll('#engineLanguage button').forEach((button) => {
+        button.classList.toggle('is-active', button.getAttribute('data-lang') === state.language);
+      });
+      $('inputFontScale').value = String(Math.round(state.fontScale * 100));
+      $('fontScaleLabel').textContent = Math.round(state.fontScale * 100) + '%';
+      document.querySelectorAll('.font-card').forEach((card) => {
+        card.classList.toggle('is-active', card.getAttribute('data-font') === state.fontPreset);
+      });
+      $('inputStarIntensity').value = String(Math.round(state.starIntensity * 100));
+      $('starIntensityLabel').textContent = Math.round(state.starIntensity * 100) + '%';
+      $('inputMeteorFrequency').value = String(Math.round(state.meteorFrequency * 100));
+      $('meteorFrequencyLabel').textContent = Math.round(state.meteorFrequency * 100) + '%';
+      document.querySelectorAll('.star-mode').forEach((card) => {
+        card.classList.toggle('is-active', card.getAttribute('data-mode') === state.starEffectMode);
+      });
+      const modeNames = {
+        'orbit-meteor': '星环全开',
+        'meteor-stars': '流星微星',
+        minimal: '极简静谧',
+        off: '关闭'
+      };
+      $('starModeValue').textContent = modeNames[state.starEffectMode] || '星环全开';
+      [$('inputOpacity'), $('inputBlur'), $('inputTint'), $('inputFontScale'), $('inputStarIntensity'), $('inputMeteorFrequency')].forEach(setFill);
+      applyPaletteToPanel(state.palette);
+      renderPreview();
+    }
+
+    function liveState() {
+      return {
+        opacity: state.opacity,
+        blur: state.blur,
+        darkTint: state.darkTint,
+        focusX: state.focusX,
+        focusY: state.focusY,
+        autoPalette: state.autoPalette,
+        promptSticky: state.promptSticky,
+        language: state.language,
+        deepI18n: state.deepI18n,
+        translateAlerts: state.translateAlerts,
+        runningRadar: state.runningRadar,
+        hideRadarWhenIdle: state.hideRadarWhenIdle,
+        quickCopyButton: state.quickCopyButton,
+        cursorParticles: state.cursorParticles,
+        questChime: state.questChime,
+        telemetryBar: state.telemetryBar,
+        telemetryShowCost: state.telemetryShowCost,
+        taskProgressBar: state.taskProgressBar,
+        quickGoalPill: state.quickGoalPill,
+        ambientClock: state.ambientClock,
+        fontPreset: state.fontPreset,
+        fontScale: state.fontScale,
+        starEffectMode: state.starEffectMode,
+        starIntensity: state.starIntensity,
+        meteorFrequency: state.meteorFrequency,
+        palette: state.palette
+      };
+    }
+
+    async function post(path, body) {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || ('HTTP ' + response.status));
+      }
+      return data;
+    }
+
+    function pushLive() {
+      pendingLive = true;
+      if (liveTimer) return;
+      liveTimer = window.setTimeout(async () => {
+        liveTimer = 0;
+        if (!pendingLive) return;
+        pendingLive = false;
+        try {
+          await post('/api/live', liveState());
+        } catch (error) {
+          $('statusDot').style.background = '#fca5a5';
+          $('statusDot').style.boxShadow = '0 0 8px rgba(252, 165, 165, 0.6)';
+        }
+      }, 55);
+    }
+
+    function persist() {
+      window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(async () => {
+        try {
+          await post('/api/config', Object.assign(liveState(), { autoPalette: state.autoPalette }));
+          $('statusDot').style.background = '#6ee7b7';
+          $('statusDot').style.boxShadow = '0 0 8px rgba(110, 231, 183, 0.6)';
+        } catch (error) {
+          setStatus('保存失败：' + error.message, 'error');
+        }
+      }, 320);
+    }
+
+    function commitLive() {
+      pushLive();
+      persist();
+    }
+
+    function setWallpaper(url) {
+      state.wallpaperUrl = url;
+      const bust = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+      $('previewImage').style.backgroundImage = 'url("' + bust + '")';
+      const image = new Image();
+      image.onload = () => {
+        previewImage = image;
+        if (state.autoPalette) {
+          autoApplyPalette(extractPaletteFromImage(image));
+        }
+      };
+      image.onerror = () => {
+        setStatus('壁纸加载失败，请检查图片路径', 'error');
+      };
+      image.src = bust;
+    }
+
+    function rgbToHsl(r, g, b) {
+      const rr = r / 255;
+      const gg = g / 255;
+      const bb = b / 255;
+      const max = Math.max(rr, gg, bb);
+      const min = Math.min(rr, gg, bb);
+      const light = (max + min) / 2;
+      if (max === min) return { h: 0, s: 0, l: light };
+      const delta = max - min;
+      const sat = light > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+      let hue;
+      if (max === rr) hue = (gg - bb) / delta + (gg < bb ? 6 : 0);
+      else if (max === gg) hue = (bb - rr) / delta + 2;
+      else hue = (rr - gg) / delta + 4;
+      return { h: hue * 60, s: sat, l: light };
+    }
+
+    function hslToHex(h, s, l) {
+      const hue = ((h % 360) + 360) % 360;
+      const sat = clamp(s, 0, 1);
+      const light = clamp(l, 0, 1);
+      const c = (1 - Math.abs(2 * light - 1)) * sat;
+      const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+      const m = light - c / 2;
+      let rr = 0;
+      let gg = 0;
+      let bb = 0;
+      if (hue < 60) { rr = c; gg = x; }
+      else if (hue < 120) { rr = x; gg = c; }
+      else if (hue < 180) { gg = c; bb = x; }
+      else if (hue < 240) { gg = x; bb = c; }
+      else if (hue < 300) { rr = x; bb = c; }
+      else { rr = c; bb = x; }
+      const toHex = (value) => Math.round((value + m) * 255).toString(16).padStart(2, '0');
+      return '#' + toHex(rr) + toHex(gg) + toHex(bb);
+    }
+
+    function averagePixels(pixels) {
+      if (!pixels.length) return null;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let h = 0;
+      let s = 0;
+      let l = 0;
+      pixels.forEach((pixel) => {
+        r += pixel.r;
+        g += pixel.g;
+        b += pixel.b;
+        h += pixel.h;
+        s += pixel.s;
+        l += pixel.l;
+      });
+      const count = pixels.length;
+      return { r: r / count, g: g / count, b: b / count, h: h / count, s: s / count, l: l / count };
+    }
+
+    function extractPaletteFromImage(image) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 24;
+      canvas.height = 24;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.drawImage(image, 0, 0, 24, 24);
+      let data;
+      try {
+        data = ctx.getImageData(0, 0, 24, 24).data;
+      } catch (error) {
+        return null;
+      }
+      const pixels = [];
+      for (let index = 0; index < data.length; index += 4) {
+        if (data[index + 3] < 200) continue;
+        const r = data[index];
+        const g = data[index + 1];
+        const b = data[index + 2];
+        const hsl = rgbToHsl(r, g, b);
+        if (hsl.l < 0.035 || hsl.l > 0.975) continue;
+        pixels.push({ r, g, b, h: hsl.h, s: hsl.s, l: hsl.l });
+      }
+      if (pixels.length < 20) return null;
+
+      const darks = pixels.filter((p) => p.l < 0.34).sort((a, b) => a.l - b.l).slice(0, Math.max(16, Math.floor(pixels.length * 0.28)));
+      const darkAvg = averagePixels(darks) || { h: 250, s: 0.3, l: 0.08 };
+      const dark = hslToHex(darkAvg.h, Math.min(0.45, darkAvg.s * 0.9), Math.min(0.17, Math.max(0.06, darkAvg.l * 0.75)));
+
+      const brights = pixels.slice()
+        .filter((p) => p.s > 0.16)
+        .sort((a, b) => (b.s * 0.55 + b.l * 0.45) - (a.s * 0.55 + a.l * 0.45))
+        .slice(0, Math.max(12, Math.floor(pixels.length * 0.14)));
+      const brightAvg = averagePixels(brights) || { h: 260, s: 0.4, l: 0.7 };
+      const highlight = hslToHex(brightAvg.h, clamp(brightAvg.s, 0.24, 0.82), clamp(brightAvg.l, 0.56, 0.84));
+
+      const accents = pixels.slice()
+        .filter((p) => p.s > 0.22 && p.l > 0.18 && p.l < 0.9)
+        .sort((a, b) => (b.s * (0.55 + Math.abs(b.l - 0.58)) - a.s * (0.55 + Math.abs(a.l - 0.58))));
+      const warmAccents = pixels
+        .filter((p) => p.h >= 22 && p.h <= 68 && p.s > 0.28 && p.l > 0.45 && p.l < 0.92)
+        .sort((a, b) => (b.s * 0.6 + b.l * 0.4) - (a.s * 0.6 + a.l * 0.4));
+      const prefersWarm = warmAccents.length >= Math.max(14, Math.floor(pixels.length * 0.035));
+      const seed = prefersWarm ? warmAccents[0] : (accents[0] || brights[0] || { h: 42, s: 0.6, l: 0.7 });
+      const hueGroup = (prefersWarm ? warmAccents : accents)
+        .filter((p) => Math.abs(p.h - seed.h) < 16 || Math.abs(p.h - seed.h) > 344)
+        .slice(0, Math.max(10, Math.floor((prefersWarm ? warmAccents : accents).length * 0.25)));
+      const accentAvg = averagePixels(hueGroup.length ? hueGroup : [seed]);
+      const accent = hslToHex(accentAvg.h, clamp(accentAvg.s, 0.44, 0.88), clamp(accentAvg.l, 0.58, 0.74));
+      const cool = hslToHex(accentAvg.h + 150, 0.52, 0.64);
+
+      return { dark, highlight, accent, cool };
+    }
+
+    function autoApplyPalette(palette) {
+      if (!palette) return;
+      applyPaletteToPanel(palette);
+      if (!state.autoPalette) return;
+      const changed = ['dark', 'highlight', 'accent'].some((key) => state.palette[key] !== palette[key]);
+      if (!changed) return;
+      state.palette = palette;
+      commitLive();
+    }
+
+    function bindSlider(id, onInput) {
+      const input = $(id);
+      input.addEventListener('input', () => {
+        setFill(input);
+        onInput(Number(input.value));
+        renderPreview();
+        pushLive();
+      });
+      input.addEventListener('change', () => {
+        onInput(Number(input.value));
+        renderPreview();
+        persist();
+      });
+    }
+
+    bindSlider('inputOpacity', (value) => {
+      state.opacity = clamp(value / 100, 0, 1);
+      $('valOpacity').textContent = Math.round(state.opacity * 100) + '%';
+    });
+
+    bindSlider('inputBlur', (value) => {
+      state.blur = clamp(value, 0, 40);
+      $('valBlur').textContent = Math.round(state.blur) + 'px';
+      $('glassSample').style.backdropFilter = 'blur(' + state.blur + 'px) saturate(150%)';
+    });
+
+    bindSlider('inputTint', (value) => {
+      state.darkTint = clamp(value / 100, 0, 0.9);
+      $('valTint').textContent = Math.round(state.darkTint * 100) + '%';
+    });
+
+    $('autoPalette').addEventListener('change', (event) => {
+      state.autoPalette = event.target.checked;
+      persist();
+      if (state.autoPalette && previewImage) {
+        autoApplyPalette(extractPaletteFromImage(previewImage));
+      }
+    });
+
+    $('promptSticky').addEventListener('change', (event) => {
+      state.promptSticky = event.target.checked;
+      commitLive();
+      setStatus(state.promptSticky ? '提问吸顶已开启（吸顶时压缩）' : '提问吸顶已关闭', 'ok');
+    });
+
+    document.querySelectorAll('#engineLanguage button').forEach((button) => {
+      button.addEventListener('click', () => {
+        const language = button.getAttribute('data-lang') === 'en' ? 'en' : 'zh-CN';
+        state.language = language;
+        renderControls();
+        commitLive();
+        setStatus(language === 'en' ? '界面语言已切换为 English' : '界面语言已切换为简体中文', 'ok');
+      });
+    });
+
+    ['deepI18n', 'translateAlerts', 'runningRadar', 'hideRadarWhenIdle', 'quickCopyButton', 'cursorParticles', 'questChime',
+      'telemetryBar', 'telemetryShowCost', 'taskProgressBar', 'quickGoalPill', 'ambientClock'].forEach((key) => {
+      $(key).addEventListener('change', (event) => {
+        state[key] = event.target.checked;
+        commitLive();
+        setStatus((event.target.checked ? '已开启：' : '已关闭：') + key, 'ok');
+      });
+    });
+
+    document.querySelectorAll('.font-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const preset = card.getAttribute('data-font');
+        if (!preset) return;
+        state.fontPreset = preset;
+        renderControls();
+        commitLive();
+        const names = {
+          'editorial-luxe': '星刊雅宋',
+          'modern-silk': '现代几何',
+          'literary-serif': '人文书卷',
+          'starry-game': '星夜萌圆'
+        };
+        setStatus('字体已切换为「' + (names[preset] || preset) + '」', 'ok');
+      });
+    });
+
+    $('inputFontScale').addEventListener('input', (event) => {
+      state.fontScale = clamp(Number(event.target.value) / 100, 0.85, 1.15);
+      renderControls();
+      commitLive();
+    });
+
+    document.querySelectorAll('.star-mode').forEach((button) => {
+      button.addEventListener('click', () => {
+        const mode = button.getAttribute('data-mode');
+        if (!mode) return;
+        state.starEffectMode = mode;
+        renderControls();
+        commitLive();
+        const names = {
+          'orbit-meteor': '星环全开',
+          'meteor-stars': '流星微星',
+          minimal: '极简静谧',
+          off: '已关闭星辰特效'
+        };
+        setStatus('星辰特效：' + (names[mode] || mode), 'ok');
+      });
+    });
+
+    $('inputStarIntensity').addEventListener('input', (event) => {
+      state.starIntensity = clamp(Number(event.target.value) / 100, 0, 1);
+      renderControls();
+      commitLive();
+    });
+
+    $('inputMeteorFrequency').addEventListener('input', (event) => {
+      state.meteorFrequency = clamp(Number(event.target.value) / 100, 0, 1);
+      renderControls();
+      commitLive();
+    });
+
+    $('btnExtract').addEventListener('click', () => {
+      if (!previewImage) {
+        setStatus('壁纸尚未加载完成', 'error');
+        return;
+      }
+      const palette = extractPaletteFromImage(previewImage);
+      if (!palette) {
+        setStatus('取色失败：图片色彩不足', 'error');
+        return;
+      }
+      state.palette = palette;
+      applyPaletteToPanel(palette);
+      commitLive();
+      setStatus('已根据壁纸生成配套主题色', 'ok');
+    });
+
+    function focusFromEvent(event) {
+      const rect = $('preview').getBoundingClientRect();
+      state.focusX = Math.round(clamp(((event.clientX - rect.left) / rect.width) * 100, 0, 100) * 10) / 10;
+      state.focusY = Math.round(clamp(((event.clientY - rect.top) / rect.height) * 100, 0, 100) * 10) / 10;
+      renderPreview();
+    }
+
+    $('preview').addEventListener('pointerdown', (event) => {
+      dragging = true;
+      $('preview').setPointerCapture?.(event.pointerId);
+      focusFromEvent(event);
+      pushLive();
+    });
+
+    $('preview').addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      focusFromEvent(event);
+      pushLive();
+    });
+
+    $('preview').addEventListener('pointerup', (event) => {
+      if (!dragging) return;
+      dragging = false;
+      focusFromEvent(event);
+      persist();
+    });
+
+    $('preview').addEventListener('pointercancel', () => {
+      dragging = false;
+      persist();
+    });
+
+    $('btnApply').addEventListener('click', async () => {
+      const button = $('btnApply');
+      button.disabled = true;
+      setStatus('正在重新注入主题…');
+      try {
+        await post('/api/apply', {});
+        setStatus('主题已应用到 Antigravity', 'ok');
+      } catch (error) {
+        setStatus('应用失败：' + error.message, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    $('btnRestore').addEventListener('click', async () => {
+      setStatus('正在还原默认背景…');
+      try {
+        await post('/api/restore', {});
+        setStatus('已还原为官方纯色主题', 'ok');
+      } catch (error) {
+        setStatus('还原失败：' + error.message, 'error');
+      }
+    });
+
+    $('wallpaperFile').addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024) {
+        setStatus('图片过大，请选择 20MB 以内的图片', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        setStatus('正在更换壁纸…');
+        try {
+          const data = await post('/api/wallpaper', { dataUrl: reader.result });
+          setWallpaper('/wallpaper');
+          setStatus('壁纸已更换，正在重新注入…', 'ok');
+          await post('/api/apply', {});
+          setStatus('壁纸与主题已更新', 'ok');
+          if (data.path) state.wallpaperPath = data.path;
+        } catch (error) {
+          setStatus('更换壁纸失败：' + error.message, 'error');
+        }
+      };
+      reader.readAsDataURL(file);
+      event.target.value = '';
+    });
+
+    async function loadConfig() {
+      try {
+        const response = await fetch('/api/config', { cache: 'no-store' });
+        const config = await response.json();
+        state.opacity = clamp(Number(config.opacity ?? 0.72), 0, 1);
+        state.blur = clamp(Number(config.blur ?? 24), 0, 40);
+        state.darkTint = clamp(Number(config.darkTint ?? 0.42), 0, 0.9);
+        state.focusX = clamp(Number(config.focusX ?? 50), 0, 100);
+        state.focusY = clamp(Number(config.focusY ?? 26), 0, 100);
+        state.autoPalette = config.autoPalette !== false;
+        state.promptSticky = config.promptSticky === true;
+        state.language = config.language === 'en' ? 'en' : 'zh-CN';
+        state.deepI18n = config.deepI18n !== false;
+        state.translateAlerts = config.translateAlerts !== false;
+        state.runningRadar = config.runningRadar !== false;
+        state.hideRadarWhenIdle = config.hideRadarWhenIdle === true;
+        state.quickCopyButton = config.quickCopyButton !== false;
+        state.cursorParticles = config.cursorParticles !== false;
+        state.questChime = config.questChime === true;
+        state.telemetryBar = config.telemetryBar !== false;
+        state.telemetryShowCost = config.telemetryShowCost !== false;
+        state.taskProgressBar = config.taskProgressBar !== false;
+        state.quickGoalPill = config.quickGoalPill === true;
+        state.ambientClock = config.ambientClock === true;
+        state.fontPreset = ['editorial-luxe', 'modern-silk', 'literary-serif', 'starry-game'].includes(config.fontPreset) ? config.fontPreset : 'editorial-luxe';
+        state.fontScale = clamp(Number(config.fontScale ?? 1), 0.85, 1.15);
+        state.starEffectMode = ['orbit-meteor', 'meteor-stars', 'minimal', 'off'].includes(config.starEffectMode) ? config.starEffectMode : 'orbit-meteor';
+        state.starIntensity = clamp(Number(config.starIntensity ?? 0.85), 0, 1);
+        state.meteorFrequency = clamp(Number(config.meteorFrequency ?? 0.6), 0, 1);
+        if (config.palette && typeof config.palette === 'object') {
+          state.palette = Object.assign(state.palette, config.palette);
+        }
+        renderControls();
+        setWallpaper('/wallpaper');
+        setStatus('已同步当前壁纸配置');
+      } catch (error) {
+        renderControls();
+        setStatus('读取配置失败：' + error.message, 'error');
+      }
+    }
+
+    async function getJSON(path) {
+      const response = await fetch(path, { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+      return data;
+    }
+
+    function setMemoryStatus(message, kind) {
+      const node = $('memoryStatus');
+      node.textContent = message;
+      node.classList.toggle('is-ok', kind === 'ok');
+      node.classList.toggle('is-error', kind === 'error');
+    }
+
+    function memoryMetaText(status) {
+      const runtime = status.runtime || {};
+      const lines = [
+        '主库：' + (status.vault || '—'),
+        '镜像：' + (status.mirror || '—'),
+        '快照：' + (status.snapshotCount || 0) + ' 个' + (status.snapshots?.[0] ? ' · 最新 ' + status.snapshots[0] : ''),
+        '人设：' + (runtime['PERSONA.md']?.updated || '—') + ' · 用户：' + (runtime['USER.md']?.updated || '—') + ' · 记忆：' + (runtime['MEMORY.md']?.updated || '—')
+      ];
+      return lines.join('\n');
+    }
+
+    async function loadMemory() {
+      try {
+        const data = await getJSON('/api/memory/runtime');
+        $('memoryPersona').value = data.persona || '';
+        $('memoryUser').value = data.user || '';
+        $('memoryMemory').value = data.memory || '';
+        $('memoryMeta').textContent = memoryMetaText(data.status || {});
+        setMemoryStatus('记忆已加载', 'ok');
+        await loadMemoryItems();
+      } catch (error) {
+        setMemoryStatus('读取记忆失败：' + error.message, 'error');
+      }
+    }
+
+    async function loadMemoryItems() {
+      try {
+        const data = await getJSON('/api/memory/items');
+        const host = $('memoryItems');
+        host.innerHTML = '';
+        const items = Array.isArray(data.items) ? data.items : [];
+        if (!items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'memory-item';
+          empty.textContent = '暂无记忆条目';
+          host.appendChild(empty);
+          return;
+        }
+        items.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'memory-item';
+          const star = document.createElement('strong');
+          star.textContent = item.pinned ? '★ ' : '· ';
+          const text = document.createElement('span');
+          text.textContent = String(item.text || item.summary || item.content || '').slice(0, 220);
+          const meta = document.createElement('div');
+          meta.textContent = (item.space ? 'space: ' + item.space + ' · ' : '') + (item.tags ? 'tags: ' + (Array.isArray(item.tags) ? item.tags.join(', ') : item.tags) : '');
+          row.append(star, text, meta);
+          host.appendChild(row);
+        });
+      } catch (error) {
+        $('memoryItems').textContent = '读取条目失败：' + error.message;
+      }
+    }
+
+    async function saveMemory() {
+      try {
+        $('btnMemorySave').disabled = true;
+        await post('/api/memory/runtime', {
+          persona: $('memoryPersona').value,
+          user: $('memoryUser').value,
+          memory: $('memoryMemory').value
+        });
+        setMemoryStatus('已保存到主库并同步镜像 latest/runtime', 'ok');
+        await loadMemory();
+      } catch (error) {
+        setMemoryStatus('保存失败：' + error.message, 'error');
+      } finally {
+        $('btnMemorySave').disabled = false;
+      }
+    }
+
+    async function backupMemory() {
+      try {
+        $('btnMemoryBackup').disabled = true;
+        await post('/api/memory/backup', {});
+        setMemoryStatus('mirror / snapshot 任务已启动，稍后点击刷新查看结果', 'ok');
+      } catch (error) {
+        setMemoryStatus('备份失败：' + error.message, 'error');
+      } finally {
+        $('btnMemoryBackup').disabled = false;
+      }
+    }
+
+    function controlRow(label, value, state) {
+      const row = document.createElement('div');
+      row.className = 'control-row';
+      const left = document.createElement('span');
+      left.textContent = label;
+      const right = document.createElement('span');
+      right.textContent = value;
+      if (state === 'error') {
+        right.style.color = '#fca5a5';
+      } else if (state === 'ok') {
+        right.style.color = '#6ee7b7';
+      }
+      row.append(left, right);
+      return row;
+    }
+
+    async function loadControl() {
+      try {
+        const data = await getJSON('/api/control/status');
+        const computer = data.computerUse || {};
+        const browser = data.browserBridge || {};
+        const computerHost = $('controlComputer');
+        const browserHost = $('controlBrowser');
+        computerHost.innerHTML = '';
+        browserHost.innerHTML = '';
+        computerHost.appendChild(controlRow('插件', computer.installed ? '已安装' : '缺失', computer.installed ? 'ok' : 'error'));
+        computerHost.appendChild(controlRow('安全策略', (computer.policy && (computer.policy.mode || computer.policy.defaultMode)) || 'guarded'));
+        computerHost.appendChild(controlRow('策略文件', computer.policyPath || '—'));
+        computerHost.appendChild(controlRow('插件路径', computer.path || '—'));
+        const bridge = browser.status || {};
+        const bridgeText = browser.status ? [bridge.mode || 'online', bridge.pid ? 'pid ' + bridge.pid : ''].filter(Boolean).join(' · ') : ('未启动' + (browser.error ? ' · ' + browser.error : ''));
+        browserHost.appendChild(controlRow('插件', browser.installed ? '已安装' : '缺失', browser.installed ? 'ok' : 'error'));
+        browserHost.appendChild(controlRow('桥接端口', String(browser.port || 8767)));
+        browserHost.appendChild(controlRow('Leader / Follower', bridgeText, browser.status ? 'ok' : 'error'));
+        browserHost.appendChild(controlRow('扩展目录', browser.extensionPath || '—'));
+        browserHost.appendChild(controlRow('Edge', browser.edgeExists ? '已检测' : '未检测到', browser.edgeExists ? 'ok' : 'error'));
+        browserHost.appendChild(controlRow('Chrome', browser.chromeExists ? '已检测' : '未检测到', browser.chromeExists ? 'ok' : 'error'));
+        $('controlBridgeHint').textContent = '安装扩展：' + (browser.extensionPath || '—') + '\n桥接端口：' + (browser.port || 8767) + '\n扩展安装后调用 browser_launch(browser="edge")，或打开 Edge 扩展弹窗填写端口并重连。';
+        $('controlStatus').textContent = '能力状态已刷新';
+      } catch (error) {
+        $('controlStatus').textContent = '读取能力状态失败：' + error.message;
+      }
+    }
+
+    let memoryLoaded = false;
+    let controlLoaded = false;
+
+    function setActiveTab(name) {
+      document.querySelectorAll('.tab').forEach((button) => {
+        const active = button.getAttribute('data-tab') === name;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-selected', String(active));
+      });
+      document.querySelectorAll('.tab-pane').forEach((pane) => {
+        pane.classList.toggle('is-active', pane.id === 'pane' + name.charAt(0).toUpperCase() + name.slice(1));
+      });
+      if (name === 'memory' && !memoryLoaded) {
+        memoryLoaded = true;
+        loadMemory();
+      }
+      if (name === 'control' && !controlLoaded) {
+        controlLoaded = true;
+        loadControl();
+      }
+    }
+
+    document.querySelectorAll('.tab').forEach((button) => {
+      button.addEventListener('click', () => setActiveTab(button.getAttribute('data-tab')));
+    });
+    $('btnMemoryRefresh').addEventListener('click', loadMemory);
+    $('btnMemoryItems').addEventListener('click', loadMemoryItems);
+    $('btnMemorySave').addEventListener('click', saveMemory);
+    $('btnMemoryBackup').addEventListener('click', backupMemory);
+    $('btnControlRefresh').addEventListener('click', loadControl);
+
+    renderControls();
+    loadConfig();
+  </script>
+</body>
+</html>

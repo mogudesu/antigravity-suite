@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "computer-use": {
+      "command": "C:\\Users\\25350\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+      "args": [
+        "C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity computer use-mogu\\scripts\\mcp_server.py"
+      ],
+      "cwd": "C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity computer use-mogu",
+      "env": {
+        "CU_DATA_DIR": "C:\\Users\\25350\\.gemini\\memory\\computer-use",
+        "CU_POLICY_PATH": "C:\\Users\\25350\\.gemini\\memory\\computer-use\\policy.json",
+        "CU_POLICY_FILE": "C:\\Users\\25350\\.gemini\\memory\\computer-use\\policy.json",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "timeoutSeconds": 120
+    }
+  }
+}

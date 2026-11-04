@@ -1,0 +1,20 @@
+{
+  "command": "py",
+  "args": [
+    "server.py"
+  ],
+  "description": "Antigravity 星夜主题引擎控制台：视觉、字体、星效、提问吸顶、永久记忆与电脑/浏览器控制",
+  "display_name": "星夜主题引擎",
+  "has_web_ui": true,
+  "restart_policy": "always",
+  "ui_config": {
+    "display_name": "星夜主题引擎 · 控制台",
+    "views": [
+      {
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "path": "/ui.html",
+        "title": "星夜主题引擎"
+      }
+    ]
+  }
+}

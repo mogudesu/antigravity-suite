@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+snapshots/
+dist/
+config/runtime.json
+config/update-state.json

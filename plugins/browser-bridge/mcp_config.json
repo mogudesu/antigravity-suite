@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "antigravity-browser-bridge": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity-browser-bridge\\mcp-server\\server.js"
+      ],
+      "env": {
+        "AG_BRIDGE_PORT": "8767"
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "mnemon": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "C:\\PROGRA~1\\nodejs\\node.exe C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity长期记忆-mogu\\scripts\\hooks\\session-start.mjs --data-dir C:\\Users\\25350\\.gemini\\memory\\mnemon-vault --mirror-dir C:\\Users\\25350\\Documents\\Antigravity-Memory-Backup",
+        "timeout": 15
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "C:\\PROGRA~1\\nodejs\\node.exe C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity长期记忆-mogu\\scripts\\hooks\\pre-invocation.mjs --data-dir C:\\Users\\25350\\.gemini\\memory\\mnemon-vault --mirror-dir C:\\Users\\25350\\Documents\\Antigravity-Memory-Backup",
+        "timeout": 15
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mnemon_memory_.*|mcp:.*mnemon.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\PROGRA~1\\nodejs\\node.exe C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity长期记忆-mogu\\scripts\\hooks\\post-tool-use.mjs --data-dir C:\\Users\\25350\\.gemini\\memory\\mnemon-vault --mirror-dir C:\\Users\\25350\\Documents\\Antigravity-Memory-Backup",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "C:\\PROGRA~1\\nodejs\\node.exe C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity长期记忆-mogu\\scripts\\hooks\\stop.mjs --data-dir C:\\Users\\25350\\.gemini\\memory\\mnemon-vault --mirror-dir C:\\Users\\25350\\Documents\\Antigravity-Memory-Backup",
+        "timeout": 15
+      }
+    ]
+  }
+}
