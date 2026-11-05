@@ -211,8 +211,8 @@ async function main() {
 
   const leaderList = await leader.request("tools/list", {});
   const followerList = await follower.request("tools/list", {});
-  check("Leader tools/list 返回 18 个工具", ((leaderList.result && leaderList.result.tools) || []).length === 18);
-  check("Follower tools/list 返回 18 个工具", ((followerList.result && followerList.result.tools) || []).length === 18);
+  check("Leader tools/list 返回 22 个工具", ((leaderList.result && leaderList.result.tools) || []).length === 22);
+  check("Follower tools/list 返回 22 个工具", ((followerList.result && followerList.result.tools) || []).length === 22);
 
   section("GET /status 自述");
   const st = await getStatus();
@@ -253,7 +253,7 @@ async function main() {
     `status=${st2 && st2.json.pid} follower=${follower.child.pid}`);
 
   const followerList2 = await follower.request("tools/list", {});
-  check("接管后 tools/list 仍为 18 个", ((followerList2.result && followerList2.result.tools) || []).length === 18);
+  check("接管后 tools/list 仍为 22 个", ((followerList2.result && followerList2.result.tools) || []).length === 22);
 
   const listenFailedCount = leader.stderr.concat(follower.stderr).filter((l) => l.indexOf("LISTEN_FAILED") !== -1).length;
   check("双进程全程零 LISTEN_FAILED", listenFailedCount === 0, String(listenFailedCount));

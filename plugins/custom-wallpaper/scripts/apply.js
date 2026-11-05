@@ -4535,6 +4535,71 @@ function generateThemeCss(dataUri, cfg) {
       -webkit-backdrop-filter: none !important;
     }
 
+    /* 用户气泡：原生内层黑底交给主题外层气泡绘制 */
+    [data-testid="user-input-step"] [data-testid="user-message-bubble"] {
+      background: transparent !important;
+      background-image: none !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+    }
+
+    /* 空的 Agent 回复占位不画卡片，避免出现一条空黑条 */
+    .scroll-mt-4 > [role="article"][aria-label="Agent response"]:empty {
+      background: transparent !important;
+      background-image: none !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      min-height: 0 !important;
+      box-shadow: none !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    /* 性能优先：主界面不再做实时 backdrop 模糊，改用静态渐变/半透明底 */
+    html body #root .agy-shell,
+    html body #root .agy-shell * {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    /* 用户气泡：外层 user-input-step 只负责布局，真正的气泡画在内层 frame 上 */
+    [data-testid="user-input-step"] {
+      background: transparent !important;
+      background-image: none !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    [data-testid="user-input-step"] .agy-user-bubble-frame {
+      background: var(--ag-card-elevated) !important;
+      border: 1px solid rgba(246, 216, 147, 0.28) !important;
+      border-right: 3px solid var(--ag-gold-bright) !important;
+      border-radius: 14px 4px 14px 14px !important;
+      padding: 1px !important;
+      overflow: hidden !important;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 248, 231, 0.18),
+        0 12px 32px -6px rgba(5, 4, 15, 0.68),
+        0 0 20px -8px rgba(246, 216, 147, 0.25) !important;
+    }
+
+    [data-testid="user-input-step"] [data-testid="user-message-bubble"] {
+      padding: 10px 16px !important;
+      background: transparent !important;
+      background-image: none !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+
     /* 全屏星场：金色星尘铺满界面，底部输入区渐隐 */
     #ag-global-stars {
       position: fixed !important;
@@ -4555,7 +4620,8 @@ function generateThemeCss(dataUri, cfg) {
       filter: drop-shadow(0 0 4px rgba(246, 216, 147, 0.55));
       animation: ag-global-twinkle var(--dur, 9s) ease-in-out infinite !important;
       animation-delay: var(--delay, 0s) !important;
-      will-change: opacity, transform;
+      /* opacity only: scaling a drop-shadow-filtered layer re-rasterizes the filter every frame */
+      will-change: opacity;
     }
 
     #ag-global-stars i.is-sparkle {
@@ -4569,8 +4635,8 @@ function generateThemeCss(dataUri, cfg) {
     }
 
     @keyframes ag-global-twinkle {
-      0%, 100% { opacity: 0.04; transform: scale(0.68) rotate(0deg); }
-      45%, 55% { opacity: var(--peak, 0.42); transform: scale(1.08) rotate(12deg); }
+      0%, 100% { opacity: 0.04; }
+      45%, 55% { opacity: var(--peak, 0.42); }
     }
 
     @media (prefers-reduced-motion: reduce) {

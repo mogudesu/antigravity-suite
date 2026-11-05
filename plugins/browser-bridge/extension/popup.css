@@ -30,4 +30,16 @@ button {
 button:hover { background: rgba(128,128,128,.22); }
 .muted { opacity: .65; }
 .small { font-size: 11px; line-height: 1.45; }
+.rec-panel {
+  margin: 10px 0; padding: 10px; border-radius: 8px;
+  border: 1px solid rgba(128,128,128,.3); background: rgba(128,128,128,.06);
+}
+.rec-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.rec-badge {
+  padding: 1px 7px; border-radius: 999px; font-size: 11px;
+  background: rgba(128,128,128,.16);
+}
+.rec-badge.on { color: #d93025; background: rgba(217,48,37,.14); border: 1px solid rgba(217,48,37,.35); font-weight: 600; }
+.rec-actions { margin: 8px 0 0; }
+button:disabled { opacity: .45; cursor: not-allowed; }
 footer { margin-top: 12px; border-top: 1px solid rgba(128,128,128,.25); padding-top: 8px; }

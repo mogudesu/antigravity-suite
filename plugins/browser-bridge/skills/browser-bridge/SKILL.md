@@ -31,6 +31,7 @@ description: 通过 antigravity-browser-bridge MCP 控制用户本机已登录�
 | 点击 / 输入 / 按键 / 悬停 / 滚动 | `browser_click`、`browser_type`、`browser_press`、`browser_hover`、`browser_scroll` |
 | 下拉选择 / 取文本 / 执行 JS / 等待 | `browser_select_option`、`browser_get_text`、`browser_evaluate`、`browser_wait_for` |
 | 截图 / 控制台 / 网络 | `browser_screenshot`、`browser_console`、`browser_network` |
+| RPA 录制开启 / 结束落盘 / 历史查询 / 参数化快放 | `browser_record_start`、`browser_record_stop`、`browser_record_list`、`browser_record_replay`（配合 `browser-record-replay` 技能可将用户演示操作自动编译为可复用 Skill） |
 
 除 `browser_launch` 外，其余工具都可带 `browser`（`edge` / `chrome`）指定目标；同时开着两个浏览器时才需要显式指定。
 

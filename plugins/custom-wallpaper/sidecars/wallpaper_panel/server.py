@@ -23,6 +23,7 @@ SIDE_DIR = os.path.dirname(os.path.abspath(__file__))
 PLUGIN_DIR = os.path.abspath(os.path.join(SIDE_DIR, "..", ".."))
 CONFIG_PATH = os.path.join(PLUGIN_DIR, "config", "config.json")
 RUNTIME_PATH = os.path.join(PLUGIN_DIR, "config", "runtime.json")
+LOCK_PATH = os.path.join(PLUGIN_DIR, "config", ".sidecar-lock.json")
 PROMPTS_PATH = os.path.join(PLUGIN_DIR, "scripts", "prompts-custom.json")
 SNAPSHOT_DIR = os.path.join(PLUGIN_DIR, "snapshots")
 SCRIPTS_DIR = os.path.join(PLUGIN_DIR, "scripts")
@@ -67,6 +68,7 @@ _telemetry_cache = {}
 _live_lock = threading.Lock()
 _live_process = None
 _watch_state = {"last": 0, "available": False, "ran": 0, "lastRun": 0, "error": ""}
+RUNTIME_PORT = [39290]
 
 
 def node_bin():
@@ -257,6 +259,64 @@ def write_runtime_port(port):
             json.dump({"port": port, "updatedAt": int(time.time())}, f)
     except Exception:
         pass
+
+
+def pid_alive(pid):
+    # os.kill(pid, 0) terminates the target on Windows, so ask kernel32 instead.
+    if not pid or int(pid) <= 0:
+        return False
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, int(pid))
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        return bool(ok) and code.value == 259
+    except Exception:
+        return True
+
+
+def claim_lock(port):
+    try:
+        os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
+        atomic_write_text(LOCK_PATH, json.dumps({
+            "pid": os.getpid(),
+            "port": port,
+            "claimedAt": int(time.time()),
+        }))
+    except Exception:
+        pass
+
+
+def lock_owner():
+    try:
+        with open(LOCK_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return int(data.get("pid") or 0)
+    except Exception:
+        return 0
+
+
+def lock_guard():
+    """Windows lets every instance bind the same port, so ownership is decided by the lock file:
+    the newest sidecar wins and any older one retires itself instead of stacking watchdogs."""
+    while True:
+        time.sleep(15)
+        try:
+            owner = lock_owner()
+            if owner == os.getpid():
+                continue
+            if owner and not pid_alive(owner):
+                claim_lock(RUNTIME_PORT[0])
+                continue
+            stop_live_daemon()
+            os._exit(0)
+        except Exception:
+            return
 
 
 def clamp_number(value, low, high, fallback):
@@ -487,7 +547,12 @@ def devtools_page_available():
 
 
 def theme_watchdog():
-    """应用重启/更新后，自动把已启用的主题重新注入新窗口。"""
+    """应用重启/更新后，自动把已启用的主题重新注入新窗口。
+
+    20s 是有意的：重载后若等到 120s 才注入，用户会看到一段没有壁纸的裸界面。
+    每轮成本只是 autostart.js 里一次极廉价的探测（主题已装就立刻退出），真正造成
+    卡顿的是过去十几个泄漏实例各自跑这个循环，那已由 .sidecar-lock.json 单实例锁解决。
+    """
     while True:
         time.sleep(20)
         _watch_state["last"] = time.time()
@@ -694,7 +759,14 @@ def control_status():
     }
 
 
-def legacy_processes():
+_legacy_cache = {"at": 0.0, "data": []}
+
+
+def legacy_processes(force=False):
+    # Get-CimInstance costs ~2s, and the panel calls this on every open.
+    now = time.time()
+    if not force and now - _legacy_cache["at"] < 60:
+        return list(_legacy_cache["data"])
     script = (
         "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "
         "'injector_zh\\.py|antigravity2\\.0-ChinesePlugin' } | "
@@ -730,6 +802,8 @@ def legacy_processes():
             pid = 0
         if pid > 0:
             result.append({"pid": pid, "name": name, "command": command})
+    _legacy_cache["at"] = now
+    _legacy_cache["data"] = list(result)
     return result
 
 
@@ -748,7 +822,7 @@ def legacy_status():
 
 
 def legacy_retire():
-    processes = legacy_processes()
+    processes = legacy_processes(force=True)
     retired = []
     for item in processes:
         try:
@@ -767,6 +841,7 @@ def legacy_retire():
             shortcut_moved = True
         except Exception:
             pass
+    _legacy_cache["at"] = 0.0
     status = legacy_status()
     status.update({"retired": retired, "shortcutMoved": shortcut_moved})
     return status
@@ -1384,12 +1459,15 @@ class WallpaperHandler(BaseHTTPRequestHandler):
 def main():
     port_env = os.environ.get("ANTIGRAVITY_SIDECAR_WEB_PORT") or os.environ.get("PORT")
     port = int(port_env) if port_env else 39290
+    RUNTIME_PORT[0] = port
     server = ThreadingHTTPServer(("127.0.0.1", port), WallpaperHandler)
     server.daemon_threads = True
     write_runtime_port(port)
+    claim_lock(port)
     print(f"[WallpaperSidecar] Ready on http://127.0.0.1:{port}", flush=True)
     threading.Thread(target=delayed_autostart, daemon=True).start()
     threading.Thread(target=theme_watchdog, daemon=True).start()
+    threading.Thread(target=lock_guard, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

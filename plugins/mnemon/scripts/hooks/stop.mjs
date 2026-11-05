@@ -53,7 +53,7 @@ function candidatesFrom(text, fromUser = true, limit = 5) {
 
 runHook('stop', async () => {
   const event = parseEvent(await readStdin());
-  const engine = openStore();
+  const engine = openStore({ light: true });
   const config = engine.config();
   const session = sessionId(event);
 

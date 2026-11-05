@@ -10,6 +10,7 @@ Thumbs.db
 *.tmp
 *.bak
 *.swp
+.sidecar-lock.json
 
 # Snapshots and runtime backups
 snapshots/

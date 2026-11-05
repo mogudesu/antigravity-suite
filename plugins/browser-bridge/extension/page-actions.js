@@ -5,7 +5,7 @@
  * 元素引用（ref）保存在隔离世界的 Map 中，页面刷新后失效，需要重新 snapshot。
  */
 (function () {
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
   if (globalThis.__AG_PA && globalThis.__AG_PA.version === VERSION) return;
 
   var REFS = new Map();
@@ -41,9 +41,9 @@
   function ignoredNode(node) {
     var el = node && node.nodeType === 1 ? node : null;
     if (!el) return false;
-    if (el.id && el.id.indexOf("agbb-control-") === 0) return true;
+    if (el.id && (el.id.indexOf("agbb-control-") === 0 || el.id.indexOf("agbb-recorder-") === 0)) return true;
     if (!el.closest) return false;
-    return !!el.closest("#agbb-control-cursor-host,#agbb-control-banner-host");
+    return !!el.closest("#agbb-control-cursor-host,#agbb-control-banner-host,#agbb-recorder-hud-host");
   }
 
   function meaningfulRecord(record) {
@@ -64,7 +64,9 @@
       }
     });
     OBSERVER.observe(document.documentElement, {
-      subtree: true, childList: true, attributes: true, characterData: true
+      subtree: true, childList: true, attributes: true, characterData: true,
+      // 全属性监听会把 style 动画每一帧都算成一次页面变化
+      attributeFilter: ['value', 'disabled', 'hidden', 'checked', 'aria-expanded', 'aria-selected', 'class']
     });
   }
 
@@ -169,7 +171,18 @@
       return null;
     }
     if (o.selector) {
-      try { return document.querySelector(o.selector); } catch (e) { return null; }
+      try {
+        var direct = document.querySelector(o.selector);
+        if (direct) return direct;
+      } catch (e) { /* continue to fallbacks */ }
+    }
+    if (Array.isArray(o.fallbacks)) {
+      for (var i = 0; i < o.fallbacks.length; i++) {
+        try {
+          var fb = o.fallbacks[i] ? document.querySelector(o.fallbacks[i]) : null;
+          if (fb) return fb;
+        } catch (e) { /* continue */ }
+      }
     }
     if (o.text) return findByText(o.text, o.nth || 0);
     return null;
@@ -255,6 +268,7 @@
       function walk(el, depth) {
         if (truncated || depth > maxDepth) return;
         if (!el || el.nodeType !== 1) return;
+        if (ignoredNode(el)) return;
         var tag = el.tagName.toLowerCase();
         if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template" ||
             tag === "meta" || tag === "link" || tag === "head" || tag === "br" || tag === "hr" ||
@@ -509,6 +523,28 @@
         truncated: t.length > maxChars,
         text: t.length > maxChars ? t.slice(0, maxChars) + "…" : t
       };
+    },
+
+    extractData: function (o) {
+      o = o || {};
+      var maxItems = o.maxItems || 50;
+      if (o.listSelector) {
+        try {
+          var nodes = document.querySelectorAll(o.listSelector);
+          if (nodes && nodes.length) {
+            var items = [];
+            for (var i = 0; i < Math.min(nodes.length, maxItems); i++) {
+              var txt = trunc(textOf(nodes[i]), 300);
+              if (txt) items.push(txt);
+            }
+            return { ok: true, mode: "list", count: items.length, items: items, url: location.href };
+          }
+        } catch (e) { /* fallback to single resolve */ }
+      }
+      var el = resolve(o);
+      if (!el) return { ok: false, error: "未找到要提取的目标元素：" + describeTarget(o) };
+      cursorOn(el, "control");
+      return { ok: true, mode: "single", text: trunc(textOf(el), 2000), url: location.href };
     },
 
     scrollJs: function (o) {

@@ -32,6 +32,8 @@ class Bridge {
     this.token = opts.token || "";
     this.log = opts.log || (() => {});
     this.onChange = opts.onChange || (() => {});
+    this.onRecordDone = opts.onRecordDone || (() => {});
+    this.onToolCall = opts.onToolCall || null;
     this.clients = new Map(); // ws -> client
     this.pending = new Map(); // id -> { resolve, reject, timer }
     this.wss = null;
@@ -190,7 +192,11 @@ class Bridge {
       }
       const args = body.args && typeof body.args === "object" ? body.args : {};
       const timeoutMs = Number(body.timeoutMs);
-      this.call(body.tool, args, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30000)
+      const effectiveTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30000;
+      const runner = typeof this.onToolCall === "function"
+        ? this.onToolCall(body.tool, args, effectiveTimeout)
+        : this.call(body.tool, args, effectiveTimeout);
+      runner
         .then((result) => this.sendJson(res, 200, { ok: true, result }))
         .catch((e) => this.sendJson(res, 200, {
           ok: false,
@@ -248,6 +254,10 @@ class Bridge {
 
       if (msg.t === "pong") { ws.isAlive = true; return; }
       if (msg.t === "ping") { try { ws.send(JSON.stringify({ t: "pong", at: Date.now() })); } catch (e) { /* ignore */ } return; }
+      if (msg.t === "record_done" && msg.recording) {
+        try { this.onRecordDone(msg.recording); } catch (e) { /* ignore */ }
+        return;
+      }
 
       if (msg.t === "res") {
         const p = this.pending.get(msg.id);

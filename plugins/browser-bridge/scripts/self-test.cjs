@@ -217,11 +217,12 @@ async function main() {
   section("工具清单");
   const list = await client.request("tools/list", {});
   const tools = (list.result && list.result.tools) || [];
-  check("工具数量为 18", tools.length === 18, "实际 " + tools.length);
+  check("工具数量为 22", tools.length === 22, "实际 " + tools.length);
   check("每个工具都有 name/description/inputSchema", tools.every((t) => t.name && t.description && t.inputSchema && t.inputSchema.type === "object"));
   const expected = ["browser_launch", "browser_status", "browser_tabs", "browser_open", "browser_history", "browser_snapshot",
     "browser_screenshot", "browser_click", "browser_type", "browser_press", "browser_hover", "browser_scroll",
-    "browser_select_option", "browser_get_text", "browser_evaluate", "browser_wait_for", "browser_console", "browser_network"];
+    "browser_select_option", "browser_get_text", "browser_evaluate", "browser_wait_for", "browser_console", "browser_network",
+    "browser_record_start", "browser_record_stop", "browser_record_list", "browser_record_replay"];
   const names = tools.map((t) => t.name);
   check("工具名齐全", expected.every((n) => names.indexOf(n) !== -1), names.join(","));
   const launchTool = tools.find((t) => t.name === "browser_launch");
@@ -371,7 +372,7 @@ async function main() {
   const finit = await follower.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "self-test-follower", version: "1" } });
   check("Follower 的 initialize 说明包含 Follower", String(finit.result && finit.result.instructions).indexOf("Follower") !== -1, JSON.stringify(finit.result && finit.result.instructions));
   const flist = await follower.request("tools/list", {});
-  check("Follower tools/list 与 Leader 一致（18 个）", ((flist.result && flist.result.tools) || []).length === 18);
+  check("Follower tools/list 与 Leader 一致（22 个）", ((flist.result && flist.result.tools) || []).length === 22);
 
   const relayMock = await connectMock({
     browser: "edge",
@@ -385,6 +386,57 @@ async function main() {
   follower.close();
   await sleep(200);
   client.close();
+
+  section("pa() 按需注入（单元级）");
+  {
+    const bg = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+    const extractFn = (src, name) => {
+      const start = src.indexOf("async function " + name + "(");
+      if (start < 0) return null;
+      let depth = 0;
+      for (let i = src.indexOf("{", start); i < src.length; i += 1) {
+        if (src[i] === "{") depth += 1;
+        else if (src[i] === "}") { depth -= 1; if (depth === 0) return src.slice(start, i + 1); }
+      }
+      return null;
+    };
+    const paSrc = extractFn(bg, "pa");
+    check("能从 background.js 取出 pa()", !!paSrc);
+    const makePa = new Function("chrome", "CURSOR_FILE", "PA_FILE", "return " + paSrc);
+    const build = (opts) => {
+      const state = { injected: 0, calls: 0, ready: !!opts.ready, protectedPage: !!opts.protectedPage };
+      const chrome = {
+        scripting: {
+          executeScript: async (o) => {
+            if (state.protectedPage) throw new Error("Cannot access a chrome:// URL");
+            if (o.files) { state.injected += 1; state.ready = true; return []; }
+            state.calls += 1;
+            return [{ result: state.ready ? { ok: true, marker: "CLICKED" } : { __AG_PA_MISSING__: true } }];
+          },
+        },
+      };
+      return { state, pa: makePa(chrome, "cursor-page.js", "page-actions.js") };
+    };
+
+    const warm = build({ ready: true });
+    const warmResult = await warm.pa(11, "click", {});
+    check("已就绪页面不再注入脚本文件", warm.state.injected === 0, JSON.stringify(warm.state));
+    check("已就绪页面只发生 1 次 executeScript", warm.state.calls === 1, JSON.stringify(warm.state));
+    check("已就绪页面返回动作结果", warmResult && warmResult.ok === true && warmResult.marker === "CLICKED", JSON.stringify(warmResult));
+
+    const cold = build({ ready: false });
+    const coldResult = await cold.pa(12, "click", {});
+    check("首次受控页面注入一次后重试成功",
+      cold.state.injected === 1 && cold.state.calls === 2 && coldResult.ok === true,
+      JSON.stringify({ ...cold.state, coldResult }));
+
+    const blocked = build({ ready: false, protectedPage: true });
+    let blockedError = "";
+    try { await blocked.pa(13, "click", {}); } catch (e) { blockedError = e.message; }
+    check("受保护页面仍给出原有中文提示",
+      blockedError.indexOf("无法在页面注入脚本") === 0 && blockedError.indexOf("browser_open") !== -1,
+      blockedError.slice(0, 90));
+  }
 
   console.log("\n结果：" + passed + " 通过 / " + failed + " 失败");
   process.exit(failed ? 1 : 0);

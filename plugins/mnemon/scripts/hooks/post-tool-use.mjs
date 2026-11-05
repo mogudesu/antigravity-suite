@@ -45,7 +45,7 @@ runHook('post-tool-use', async () => {
   const rawResult = pick(event, ['toolResult', 'tool_result', 'result', 'output', 'tool.output']);
   const rawInput = pick(event, ['toolInput', 'tool_input', 'arguments', 'tool.input']);
 
-  const engine = openStore();
+  const engine = openStore({ light: true });
   const receipt = summarize(toolName, rawResult ?? rawInput);
   engine.recordReceipt({ session: sessionId(event), read: [], wrote: [], note: receipt });
 

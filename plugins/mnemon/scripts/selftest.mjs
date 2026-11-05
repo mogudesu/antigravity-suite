@@ -84,6 +84,10 @@ const enHits = engine.searchMemories('node runtime version', { limit: 5 });
 check('English search recalls the right memory', enHits.length >= 2, JSON.stringify(enHits.map((h) => h.text)));
 check('search bumps access counters', engine.readMemory(second.id).accessCount >= 1);
 
+const accessBeforeAutoRecall = engine.readMemory(second.id).accessCount;
+engine.buildTurnContext({ prompt: 'node runtime version', session: 'recall-touch-test' });
+check('automatic recall does not rewrite usage', engine.readMemory(second.id).accessCount === accessBeforeAutoRecall);
+
 const updated = engine.updateMemory(second.id, { text: 'Node runtime is pinned to 24.19.0 and pnpm is the package manager' });
 check('update rewrites and keeps the previous wording', updated.action === 'updated' && updated.previousText.includes('24.19.0'));
 
@@ -289,6 +293,10 @@ check('SessionStart injects persona and pinned memory', !!start.json && start.js
 const pre = runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: 'selftest', prompt: 'How should I write commit messages?' });
 check('PreInvocation injects recalled memory', !!pre.json && !!pre.json.injectSteps && pre.json.injectSteps[0].ephemeralMessage.includes('mnemon-recall'), pre.stdout);
 check('PreInvocation uses ephemeralMessage only', !!pre.json && pre.json.injectSteps[0].systemMessage === undefined && pre.json.injectSteps[0].userMessage === undefined, pre.stdout);
+const preRepeat = runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: 'selftest', prompt: 'How should I write commit messages?' });
+check('PreInvocation skips a repeated tool step in the same turn',
+  preRepeat.code === 0 && !!preRepeat.json && preRepeat.json.injectSteps === undefined,
+  preRepeat.stdout.slice(0, 200));
 const preMiss = runHook('pre-invocation.mjs', { event: 'PreInvocation', prompt: 'zzzz unrelated zzzz' });
 check('PreInvocation refreshes resident memory without keyword hits',
   preMiss.code === 0 && !!preMiss.json && !!preMiss.json.injectSteps &&

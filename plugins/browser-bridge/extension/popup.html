@@ -25,6 +25,18 @@
     <button id="reconnect">重连</button>
   </div>
 
+  <div class="rec-panel">
+    <div class="rec-header">
+      <strong>🎬 RPA 录制与回放</strong>
+      <span id="rec-state" class="rec-badge">未录制</span>
+    </div>
+    <div id="rec-detail" class="muted small">点击下方按钮可在当前页面开启 RPA 动作录制</div>
+    <div class="actions rec-actions">
+      <button id="rec-start" class="btn-rec">🔴 开始录制当前页</button>
+      <button id="rec-stop" class="btn-stop" disabled>⏹ 完成录制</button>
+    </div>
+  </div>
+
   <div id="detail" class="muted small"></div>
 
   <footer class="muted small">

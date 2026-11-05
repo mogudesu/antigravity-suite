@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "computer-use",
   "displayName": "antigravity computer use-mogu",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Give Antigravity hands and eyes on the local desktop: windows, accessibility tree, screenshots, mouse, keyboard, clipboard and app launching. No dependencies.",
   "logo": "assets/logo.png",
   "suggestedPrompts": [

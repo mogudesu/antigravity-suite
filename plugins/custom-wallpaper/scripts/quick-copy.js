@@ -188,13 +188,21 @@
     }, 1600);
   }
 
+  // Style-only visibility. A getBoundingClientRect() inside this filter forced a full relayout
+  // on every animation frame while the page was streaming.
+  function isRendered(node) {
+    return typeof node.checkVisibility === "function"
+      ? node.checkVisibility({ contentVisibilityAuto: false, opacity: true, visibility: true })
+      : node.getBoundingClientRect().width > 0;
+  }
+
   function ensureArtifactButtons() {
     if (cfg().quickCopyButton === false) {
       document.querySelectorAll(`.${ARTIFACT_CLASS},.${CHAT_CLASS}`).forEach((node) => node.remove());
       return;
     }
     const moreButtons = Array.from(document.querySelectorAll('[data-testid="more-actions-overflow"]'))
-      .filter((node) => !node.closest(".bg-sidebar") && !node.closest(`.${ARTIFACT_CLASS}`) && node.getBoundingClientRect().width > 0);
+      .filter((node) => !node.closest(".bg-sidebar") && !node.closest(`.${ARTIFACT_CLASS}`) && isRendered(node));
     moreButtons.forEach((more) => {
       const parent = more.parentElement;
       if (!parent || parent.querySelector(`.${ARTIFACT_CLASS}`)) return;
@@ -333,14 +341,15 @@
     syncLabels();
   }
 
-  let scheduled = false;
+  // Streaming mutates the DOM every frame; a copy button landing 300ms late is invisible,
+  // re-measuring the document 60 times a second is not.
+  let scheduled = 0;
   const schedule = () => {
     if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
+    scheduled = window.setTimeout(() => {
+      scheduled = 0;
       tick();
-    });
+    }, 300);
   };
 
   new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });

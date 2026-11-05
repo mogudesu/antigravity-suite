@@ -14,6 +14,9 @@ const DEFAULT_SETTINGS = {
 const WS_PATH = "/bridge";
 const PA_FILE = "page-actions.js";
 const CURSOR_FILE = "cursor-page.js";
+const RECORDER_FILE = "recorder-page.js";
+const REC_ACTIVE_KEY = "ag:recordingSession";
+const REC_LAST_KEY = "ag:lastCompletedRecording";
 const MAX_LOG_ENTRIES = 400;
 const KEEPALIVE_ALARM = "ag-keepalive";
 
@@ -27,6 +30,8 @@ let lastConnectedAt = 0;
 let bannerTabId = null; // 当前正在控制的标签页（原生调试提示条由 CDP 附加触发）
 const bannerTabs = new Set(); // 控制过的标签页，断开时统一清理鼠标/旧顶栏/原生调试条
 const legacyBannerCleared = new Set(); // 已清除旧版页面顶栏的标签页
+let recordingSession = null; // 当前正在进行的 RPA 录制会话
+let lastCompletedRecording = null; // 最近一次完成的 RPA 录制会话（供弹窗停止后由 MCP 拉取）
 
 const logs = new Map(); // tabId -> { console: [], network: [] }
 
@@ -266,27 +271,46 @@ async function waitComplete(tabId, timeoutMs = 15000) {
   }
 }
 
-/** 注入页面动作模块并调用其中一个方法 */
+/** 调用页面动作模块；只在模块缺失（首次受控或页面刚刷新）时才注入文件 */
 async function pa(tabId, method, args) {
   const target = { tabId: Number(tabId) };
-  try {
-    await chrome.scripting.executeScript({ target, files: [CURSOR_FILE, PA_FILE], world: "ISOLATED" });
-  } catch (e) {
-    throw new Error(
-      "无法在页面注入脚本（" + ((e && e.message) || e) + "）。受保护页面（edge://、chrome://、扩展商店、内置 PDF 阅读器、新标签页）不支持页面动作，请先 browser_open 到一个普通网页。"
-    );
-  }
-  const results = await chrome.scripting.executeScript({
+  const call = () => chrome.scripting.executeScript({
     target,
     world: "ISOLATED",
     func: (m, a) => {
       const mod = globalThis.__AG_PA;
-      if (!mod || typeof mod[m] !== "function") return { ok: false, error: "页面动作模块未就绪" };
+      if (!mod || typeof mod[m] !== "function") return { __AG_PA_MISSING__: true };
       return mod[m](a);
     },
     args: [method, args || {}],
   });
-  const r = results && results[0] ? results[0].result : null;
+  const inject = async () => {
+    try {
+      await chrome.scripting.executeScript({ target, files: [CURSOR_FILE, PA_FILE], world: "ISOLATED" });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+  const unwrap = (results) => (results && results[0] ? results[0].result : null);
+
+  let results;
+  try {
+    results = await call();
+  } catch (e) {
+    if (!(await inject())) {
+      throw new Error(
+        "无法在页面注入脚本（" + ((e && e.message) || e) + "）。受保护页面（edge://、chrome://、扩展商店、内置 PDF 阅读器、新标签页）不支持页面动作，请先 browser_open 到一个普通网页。"
+      );
+    }
+    results = await call();
+  }
+  let r = unwrap(results);
+  if (r && r.__AG_PA_MISSING__) {
+    if (!(await inject())) return { ok: false, error: "页面动作模块未就绪" };
+    r = unwrap(await call());
+    if (r && r.__AG_PA_MISSING__) return { ok: false, error: "页面动作模块未就绪" };
+  }
   if (r === null || r === undefined) throw new Error("页面动作没有返回结果（方法 " + method + "）");
   return r;
 }
@@ -475,13 +499,195 @@ async function handleServerMessage(msg) {
 }
 
 function refreshBadge() {
-  const text = wsState === "connected" ? "ON" : "";
+  const isRec = !!(recordingSession && recordingSession.active);
+  const text = isRec ? "REC" : (wsState === "connected" ? "ON" : "");
+  const color = isRec ? "#d93025" : "#1e8e3e";
   try {
     const p = chrome.action.setBadgeText({ text });
     if (p && p.catch) p.catch(() => {});
-    const p2 = chrome.action.setBadgeBackgroundColor({ color: "#1e8e3e" });
+    const p2 = chrome.action.setBadgeBackgroundColor({ color });
     if (p2 && p2.catch) p2.catch(() => {});
   } catch (e) { /* ignore */ }
+}
+
+/* ------------------------------------------------------------------ RPA 录制管理 */
+
+async function loadRecordingState() {
+  try {
+    const data = await chrome.storage.local.get([REC_ACTIVE_KEY, REC_LAST_KEY]);
+    if (data && data[REC_ACTIVE_KEY] && data[REC_ACTIVE_KEY].active) {
+      recordingSession = data[REC_ACTIVE_KEY];
+    }
+    if (data && data[REC_LAST_KEY]) {
+      lastCompletedRecording = data[REC_LAST_KEY];
+    }
+  } catch (e) { /* ignore */ }
+}
+const recordingReady = loadRecordingState();
+
+async function persistRecordingState() {
+  try {
+    await chrome.storage.local.set({
+      [REC_ACTIVE_KEY]: recordingSession || null,
+      [REC_LAST_KEY]: lastCompletedRecording || null,
+    });
+  } catch (e) { /* ignore */ }
+}
+
+async function injectRecorder(tabId, opts = {}) {
+  const target = { tabId: Number(tabId) };
+  try {
+    await chrome.scripting.executeScript({ target, files: [RECORDER_FILE], world: "ISOLATED" });
+    const res = await chrome.scripting.executeScript({
+      target,
+      world: "ISOLATED",
+      func: (o) => {
+        const rec = globalThis.__AGBB_RECORDER;
+        if (!rec || typeof rec.start !== "function") return { ok: false, error: "录制模块未就绪" };
+        return rec.start(o || {});
+      },
+      args: [opts],
+    });
+    return (res && res[0] && res[0].result) || { ok: false, error: "录制模块未返回状态" };
+  } catch (e) {
+    return {
+      ok: false,
+      error: "无法在当前页面注入录制器（" + ((e && e.message) || e) + "）。受保护页面（edge://、chrome://、新标签页等）不支持录制，请先打开一个普通网页。",
+    };
+  }
+}
+
+async function stopRecorderOnTab(tabId) {
+  const target = { tabId: Number(tabId) };
+  try {
+    await chrome.scripting.executeScript({
+      target,
+      world: "ISOLATED",
+      func: () => {
+        const rec = globalThis.__AGBB_RECORDER;
+        if (rec && typeof rec.stop === "function") return rec.stop();
+        const host = document.getElementById("agbb-recorder-hud-host");
+        if (host && host.parentNode) host.parentNode.removeChild(host);
+        return { ok: true };
+      },
+    });
+  } catch (e) { /* 标签页已关闭或受保护页面 */ }
+}
+
+async function startRecordingSession(args = {}) {
+  await recordingReady;
+  if (recordingSession && recordingSession.active) {
+    for (const tid of (recordingSession.tabIds || [])) {
+      await stopRecorderOnTab(tid);
+    }
+  }
+
+  let tab = null;
+  if (args.tabId != null) {
+    tab = await getTab({ tabId: args.tabId });
+  } else if (args.newTab) {
+    const url = normalizeUrl(args.url || "about:blank");
+    tab = await chrome.tabs.create({ url, active: true });
+    await waitComplete(tab.id, 15000);
+    tab = await chrome.tabs.get(tab.id);
+  } else {
+    tab = await getActiveTab();
+    if (!tab) throw new Error("当前没有可录制的标签页");
+  }
+
+  if (args.url && !args.newTab) {
+    const targetUrl = normalizeUrl(args.url);
+    await chrome.tabs.update(tab.id, { url: targetUrl, active: true });
+    await waitComplete(tab.id, 15000);
+    tab = await chrome.tabs.get(tab.id);
+  } else {
+    try { await chrome.tabs.update(tab.id, { active: true }); } catch (e) { /* ignore */ }
+  }
+
+  const now = Date.now();
+  const recordingId = "rec-" + now.toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+  const initialSteps = [];
+  if (tab.url && !/^(about:blank|edge:\/\/|chrome:\/\/)/i.test(tab.url)) {
+    initialSteps.push({
+      index: 1,
+      type: "navigate",
+      url: tab.url,
+      pageTitle: tab.title || "",
+      tabId: tab.id,
+      at: now,
+    });
+  }
+
+  recordingSession = {
+    recordingId,
+    title: args.title || tab.title || "浏览器操作录制",
+    active: true,
+    paused: false,
+    startedAt: new Date(now).toISOString(),
+    browser: detectBrowser(),
+    initialUrl: tab.url || "",
+    initialTitle: tab.title || "",
+    tabIds: [tab.id],
+    steps: initialSteps,
+  };
+
+  await persistRecordingState();
+  refreshBadge();
+
+  const injected = await injectRecorder(tab.id, {
+    sessionId: recordingId,
+    stepCount: recordingSession.steps.length,
+    paused: false,
+    lastSummary: tab.url ? ("已就绪: " + (tab.title || tab.url)) : "等待操作…",
+  });
+
+  return {
+    ok: true,
+    status: "recording",
+    recordingId,
+    title: recordingSession.title,
+    tabId: tab.id,
+    url: tab.url,
+    pageTitle: tab.title,
+    hudInjected: !!(injected && injected.ok),
+    hudNote: injected && !injected.ok ? injected.error : undefined,
+    stepCount: recordingSession.steps.length,
+    message: "RPA 录制已开启。请在浏览器中正常演示操作，右下角悬浮录制胶囊可随时添加「💬 备注规则」、开启「🎯 标记提取」或点击「⏹ 完成」。",
+  };
+}
+
+async function stopRecordingSession(args = {}) {
+  await recordingReady;
+  if (recordingSession && recordingSession.active) {
+    const tids = Array.from(new Set(recordingSession.tabIds || []));
+    await Promise.all(tids.map((id) => stopRecorderOnTab(id)));
+    recordingSession.active = false;
+    recordingSession.paused = false;
+    recordingSession.stoppedAt = new Date().toISOString();
+    if (args.title) recordingSession.title = args.title;
+    lastCompletedRecording = Object.assign({}, recordingSession);
+    recordingSession = null;
+    await persistRecordingState();
+    refreshBadge();
+    return {
+      ok: true,
+      status: "stopped",
+      recording: lastCompletedRecording,
+    };
+  }
+  if (lastCompletedRecording) {
+    if (args.title) lastCompletedRecording.title = args.title;
+    return {
+      ok: true,
+      status: "already_stopped",
+      note: "录制此前已在页面悬浮胶囊或扩展弹窗中完成，直接返回最近一次完成的录制数据。",
+      recording: lastCompletedRecording,
+    };
+  }
+  return {
+    ok: false,
+    error: "当前没有正在进行或已完成的录制记录。请先调用 browser_record_start 开启录制，或在浏览器扩展弹窗中点击「开始录制」。",
+  };
 }
 
 /* ------------------------------------------------------------------ 工具实现 */
@@ -716,7 +922,7 @@ const HANDLERS = {
     const tab = await getControlTab(args);
     let x = args.x, y = args.y, info = null;
     if (x == null || y == null) {
-      info = await pa(tab.id, "locate", { ref: args.ref, selector: args.selector, text: args.text, nth: args.nth });
+      info = await pa(tab.id, "locate", { ref: args.ref, selector: args.selector, fallbacks: args.fallbacks, text: args.text, nth: args.nth });
       if (!info.ok) return info;
       x = info.x; y = info.y;
     }
@@ -729,7 +935,7 @@ const HANDLERS = {
       if (!info) {
         return { ok: false, error: "坐标点击需要 CDP 通道，但附加失败：" + ((e && e.message) || e) };
       }
-      const r = await pa(tab.id, "clickJs", { ref: args.ref, selector: args.selector, text: args.text, nth: args.nth });
+      const r = await pa(tab.id, "clickJs", { ref: args.ref, selector: args.selector, fallbacks: args.fallbacks, text: args.text, nth: args.nth });
       return Object.assign({ tabId: tab.id, fallbackReason: (e && e.message) || String(e) }, r);
     }
   },
@@ -737,9 +943,9 @@ const HANDLERS = {
   async browser_type(args) {
     if (args.text == null) throw new Error("browser_type 需要 text 参数");
     const tab = await getControlTab(args);
-    const target = { ref: args.ref, selector: args.selector, text: args.text };
+    const target = { ref: args.ref, selector: args.selector, fallbacks: args.fallbacks, text: args.text };
     if (args.realKeys) {
-      const focused = await pa(tab.id, "focus", { ref: args.ref, selector: args.selector, text: args.text });
+      const focused = await pa(tab.id, "focus", { ref: args.ref, selector: args.selector, fallbacks: args.fallbacks, text: args.text });
       if (!focused.ok) return focused;
       if (focused.sensitive === "password") {
         return {
@@ -755,7 +961,7 @@ const HANDLERS = {
         return { ok: true, engine: "cdp-keys", tabId: tab.id, typed: n, target: focused };
       } catch (e) { /* 落到 JS 写值 */ }
     }
-    const r = await pa(tab.id, "type", { ref: target.ref, selector: target.selector, text: args.text, clear: args.clear, submit: args.submit });
+    const r = await pa(tab.id, "type", { ref: target.ref, selector: target.selector, fallbacks: target.fallbacks, text: args.text, clear: args.clear, submit: args.submit });
     return Object.assign({ tabId: tab.id }, r);
   },
 
@@ -821,7 +1027,7 @@ const HANDLERS = {
 
   async browser_select_option(args) {
     const tab = await getControlTab(args);
-    const r = await pa(tab.id, "select", { ref: args.ref, selector: args.selector, value: args.value, label: args.label });
+    const r = await pa(tab.id, "select", { ref: args.ref, selector: args.selector, fallbacks: args.fallbacks, value: args.value, label: args.label });
     return Object.assign({ tabId: tab.id }, r);
   },
 
@@ -890,6 +1096,172 @@ const HANDLERS = {
       note: Cdp.isAttached(tab.id) ? undefined : "CDP 尚未附加到该标签页，网络记录从首次 CDP 动作之后才开始采集",
     };
   },
+
+  async browser_record_start(args) {
+    return await startRecordingSession(args || {});
+  },
+
+  async browser_record_stop(args) {
+    return await stopRecordingSession(args || {});
+  },
+
+  async browser_record_list() {
+    await recordingReady;
+    return {
+      ok: true,
+      browser: detectBrowser(),
+      activeRecording: recordingSession || null,
+      lastCompletedRecording: lastCompletedRecording || null,
+    };
+  },
+
+  async browser_record_replay(args) {
+    const steps = Array.isArray(args && args.steps) ? args.steps : [];
+    if (!steps.length) {
+      return { ok: false, error: "browser_record_replay 没有收到可执行的 steps 数组" };
+    }
+    const stopOnError = args.stopOnError !== false;
+    const stepDelayMs = Math.max(50, Math.min(Number(args.stepDelayMs || 400), 10000));
+    let tab = await getControlTab(args);
+    const trace = [];
+    const extractedData = {};
+    let completedCount = 0;
+
+    function buildTarget(loc) {
+      loc = loc || {};
+      const sem = loc.semantic || {};
+      return {
+        selector: loc.selector || undefined,
+        fallbacks: Array.isArray(loc.fallbacks) ? loc.fallbacks : undefined,
+        text: sem.text || sem.name || undefined,
+      };
+    }
+
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i] || {};
+      const type = s.type;
+      let res = { ok: true };
+      try {
+        if (type === "navigate") {
+          if (s.url) {
+            res = await HANDLERS.browser_open({ url: s.url, tabId: tab.id });
+            if (res && res.tabId) tab = await getTab({ tabId: res.tabId });
+          }
+        } else if (type === "click") {
+          const t = buildTarget(s.locator);
+          res = await HANDLERS.browser_click(Object.assign({ tabId: tab.id }, t));
+          await waitComplete(tab.id, 5000);
+        } else if (type === "type") {
+          if (s.sensitive === "password" || s.value === "[REDACTED_PASSWORD]") {
+            res = { ok: true, skipped: "password-redacted", note: "密码框步骤已跳过写入，复用浏览器已有登录态" };
+          } else {
+            const t = buildTarget(s.locator);
+            res = await HANDLERS.browser_type({
+              tabId: tab.id,
+              selector: t.selector,
+              fallbacks: t.fallbacks,
+              text: String(s.value == null ? "" : s.value),
+              clear: s.clear !== false,
+              submit: !!s.submit,
+            });
+            if (s.submit) await waitComplete(tab.id, 6000);
+          }
+        } else if (type === "select") {
+          const t = buildTarget(s.locator);
+          res = await HANDLERS.browser_select_option({
+            tabId: tab.id,
+            selector: t.selector,
+            fallbacks: t.fallbacks,
+            value: s.value,
+            label: s.label,
+          });
+        } else if (type === "press") {
+          const t = buildTarget(s.locator);
+          res = await HANDLERS.browser_press({
+            tabId: tab.id,
+            key: s.key || "Enter",
+            selector: t.selector,
+          });
+          if (s.key === "Enter") await waitComplete(tab.id, 5000);
+        } else if (type === "scroll") {
+          res = await HANDLERS.browser_scroll({
+            tabId: tab.id,
+            deltaY: s.deltaY,
+            direction: s.direction || "down",
+            amount: s.amount || 600,
+          });
+        } else if (type === "extract") {
+          const t = buildTarget(s.locator);
+          res = await pa(tab.id, "extractData", {
+            listSelector: s.listSelector,
+            selector: t.selector,
+            fallbacks: t.fallbacks,
+            text: t.text,
+            maxItems: s.maxItems || 30,
+          });
+          if (res && res.ok) {
+            const key = s.field || ("extract_step_" + (s.index || (i + 1)));
+            extractedData[key] = res.mode === "list" ? res.items : res.text;
+          }
+        } else if (type === "wait") {
+          if (s.selector || s.text) {
+            res = await HANDLERS.browser_wait_for({ tabId: tab.id, selector: s.selector, text: s.text, timeoutMs: s.timeoutMs || 10000 });
+          } else {
+            await sleep(Number(s.ms || 1000));
+            res = { ok: true, waitedMs: Number(s.ms || 1000) };
+          }
+        } else if (type === "note") {
+          res = { ok: true, userNote: s.note };
+        }
+      } catch (e) {
+        res = { ok: false, error: (e && e.message) || String(e) };
+      }
+
+      const stepOk = !!(res && res.ok !== false);
+      trace.push({
+        stepIndex: i,
+        type,
+        ok: stepOk,
+        userNote: s.userNote || s.note || undefined,
+        error: stepOk ? undefined : (res && res.error) || "步骤执行未成功",
+      });
+
+      if (!stepOk && stopOnError) {
+        let curTab = tab;
+        try { curTab = await chrome.tabs.get(tab.id); } catch (e) { /* ignore */ }
+        return {
+          ok: false,
+          tabId: tab.id,
+          currentUrl: curTab && curTab.url,
+          currentTitle: curTab && curTab.title,
+          completedCount,
+          totalSteps: steps.length,
+          failedStepIndex: i,
+          failedStep: s,
+          error: (res && res.error) || ("第 " + (i + 1) + " 步 (" + type + ") 回放未命中目标元素"),
+          extractedData,
+          trace,
+          selfHealHint: "确定性 RPA 回放在第 " + (i + 1) + " 步中断。请调用 browser_snapshot 获取当前页面的最新 ref 结构，按照业务意图手动完成该步及后续步骤。",
+        };
+      }
+
+      if (stepOk) completedCount++;
+      if (i < steps.length - 1) await sleep(stepDelayMs);
+    }
+
+    let finalTab = tab;
+    try { finalTab = await chrome.tabs.get(tab.id); } catch (e) { /* ignore */ }
+    return {
+      ok: true,
+      tabId: tab.id,
+      finalUrl: finalTab && finalTab.url,
+      finalTitle: finalTab && finalTab.title,
+      completedCount,
+      totalSteps: steps.length,
+      extractedData,
+      trace,
+    };
+  },
 };
 
 /* ------------------------------------------------------------------ 事件与生命周期 */
@@ -950,7 +1322,24 @@ chrome.windows.onRemoved.addListener((windowId) => {
   if (leaseWindowId === windowId) persistLease(null);
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+chrome.tabs.onCreated.addListener((tab) => {
+  if (
+    recordingSession &&
+    recordingSession.active &&
+    tab &&
+    tab.id != null &&
+    tab.openerTabId != null &&
+    Array.isArray(recordingSession.tabIds) &&
+    recordingSession.tabIds.includes(tab.openerTabId)
+  ) {
+    if (!recordingSession.tabIds.includes(tab.id)) {
+      recordingSession.tabIds.push(tab.id);
+      persistRecordingState();
+    }
+  }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo && changeInfo.status === "loading") logs.delete(tabId);
   if (changeInfo && changeInfo.status === "complete" && bannerTabId === tabId) {
     setTimeout(() => {
@@ -959,6 +1348,41 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
         .then(() => showCursorCenter(tabId, "open"))
         .catch(() => {});
     }, 220);
+  }
+  if (
+    changeInfo &&
+    changeInfo.status === "complete" &&
+    recordingSession &&
+    recordingSession.active &&
+    Array.isArray(recordingSession.tabIds) &&
+    recordingSession.tabIds.includes(tabId)
+  ) {
+    const url = (tab && tab.url) || "";
+    const title = (tab && tab.title) || "";
+    if (url && !/^(about:blank|edge:\/\/|chrome:\/\/)/i.test(url)) {
+      const steps = recordingSession.steps || [];
+      const last = steps[steps.length - 1];
+      if (!last || last.type !== "navigate" || last.url !== url) {
+        steps.push({
+          index: steps.length + 1,
+          type: "navigate",
+          url,
+          pageTitle: title,
+          tabId,
+          at: Date.now(),
+        });
+        persistRecordingState();
+      }
+    }
+    setTimeout(() => {
+      if (!recordingSession || !recordingSession.active) return;
+      injectRecorder(tabId, {
+        sessionId: recordingSession.recordingId,
+        stepCount: (recordingSession.steps || []).length,
+        paused: !!recordingSession.paused,
+        lastSummary: "已跳转: " + (title || url),
+      }).catch(() => {});
+    }, 180);
   }
 });
 
@@ -972,6 +1396,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   (async () => {
     try {
       if (msg && msg.type === "ag:status") {
+        await recordingReady;
         let tabs = 0, active = null;
         try { tabs = (await chrome.tabs.query({})).length; } catch (e) { /* ignore */ }
         try {
@@ -982,7 +1407,67 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         respond({
           ok: true, wsState, settings, browser: detectBrowser(),
           tabs, activeTab: active, leaseTabId, cdpTabId: ids.length ? ids[0] : null, lastError,
+          recording: recordingSession && recordingSession.active ? {
+            active: true,
+            paused: !!recordingSession.paused,
+            recordingId: recordingSession.recordingId,
+            title: recordingSession.title,
+            stepCount: (recordingSession.steps || []).length,
+          } : null,
+          lastRecording: lastCompletedRecording ? {
+            recordingId: lastCompletedRecording.recordingId,
+            title: lastCompletedRecording.title,
+            stepCount: (lastCompletedRecording.steps || []).length,
+            stoppedAt: lastCompletedRecording.stoppedAt,
+          } : null,
         });
+        return;
+      }
+      if (msg && msg.type === "ag:record:step") {
+        await recordingReady;
+        if (!recordingSession || !recordingSession.active || recordingSession.paused) {
+          respond({ ok: false, ignored: true });
+          return;
+        }
+        const rawStep = Object.assign({}, msg.step || {});
+        const steps = recordingSession.steps || (recordingSession.steps = []);
+        if (sender && sender.tab && sender.tab.id != null) {
+          rawStep.tabId = sender.tab.id;
+          if (!recordingSession.tabIds.includes(sender.tab.id)) {
+            recordingSession.tabIds.push(sender.tab.id);
+          }
+        }
+        // 用户在 HUD 添加的规则备注同时绑定到最近一个操作步骤上，方便编译 Skill 时直接关联上下文
+        if (rawStep.type === "note" && rawStep.note && steps.length > 0) {
+          const prev = steps[steps.length - 1];
+          prev.userNote = prev.userNote ? (prev.userNote + "；" + rawStep.note) : rawStep.note;
+        }
+        rawStep.index = steps.length + 1;
+        steps.push(rawStep);
+        await persistRecordingState();
+        respond({ ok: true, stepCount: steps.length });
+        return;
+      }
+      if (msg && msg.type === "ag:record:pause") {
+        await recordingReady;
+        if (recordingSession && recordingSession.active) {
+          recordingSession.paused = !!msg.paused;
+          await persistRecordingState();
+        }
+        respond({ ok: true, paused: !!(recordingSession && recordingSession.paused) });
+        return;
+      }
+      if (msg && (msg.type === "ag:record:finishFromHud" || msg.type === "ag:record:stop")) {
+        const res = await stopRecordingSession(msg.args || {});
+        if (res && res.ok && res.recording) {
+          sendRaw({ t: "record_done", recording: res.recording });
+        }
+        respond(res);
+        return;
+      }
+      if (msg && msg.type === "ag:record:start") {
+        const res = await startRecordingSession(msg.args || {});
+        respond(res);
         return;
       }
       if (msg && msg.type === "ag:settings") {

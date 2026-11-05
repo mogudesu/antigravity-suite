@@ -489,41 +489,58 @@
     toast.timer = setTimeout(() => node.classList.remove("is-visible"), 1600);
   }
 
+  function dropUnread(id) {
+    const target = state.entries.find((entry) => entry.id === id);
+    if (!target?.unread) return;
+    state.entries = state.entries.filter((entry) => entry.id !== id);
+    render();
+  }
+
   function navigate(id) {
     if (!id) return;
-    const target = state.entries.find((entry) => entry.id === id);
-    if (target?.unread) {
-      state.entries = state.entries.filter((entry) => entry.id !== id);
-      render();
-    }
     const path = "/c/" + id;
-    if (location.pathname === path) return;
+    if (location.pathname === path) {
+      dropUnread(id);
+      return;
+    }
     const existing = document.querySelector(`a[href="${path}"]`);
     if (existing) {
       existing.click();
+      state.currentId = id;
+      dropUnread(id);
       return;
     }
-    const link = document.createElement("a");
-    link.href = path;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    try {
-      link.click();
-      if (location.pathname !== path) {
-        history.pushState({}, "", path);
-        window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
-      }
-    } finally {
-      link.remove();
-    }
-    setTimeout(() => {
-      if (location.pathname !== path) {
-        history.pushState({}, "", path);
-        window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
-      }
-    }, 30);
+
+    // A detached <a> is not one of the app's Router links, so nothing intercepts the
+    // click and the browser performs a real document navigation: the whole Antigravity
+    // renderer reloads. Unread conversations from another project are exactly the case
+    // where no link exists yet, so this path must stay inside the SPA.
+    const beforePath = location.pathname;
+    const beforeTitle = document.title;
+    history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
     state.currentId = id;
-    render();
+
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      // The title alone is not proof: an id the app cannot resolve also changes it,
+      // landing on an empty "Untitled Conversation". Require rendered messages.
+      if (document.title !== beforeTitle && document.querySelectorAll('[role="article"]').length > 0) {
+        window.clearInterval(timer);
+        dropUnread(id);
+        return;
+      }
+      if (attempts >= 14) {
+        window.clearInterval(timer);
+        state.currentId = beforePath.split("/c/")[1] || "";
+        if (location.pathname === path) {
+          history.pushState({}, "", beforePath);
+          window.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+        }
+        toast(text("这个对话不在当前窗口，请从左侧列表打开", "Not in this window — open it from the sidebar"));
+      }
+    }, 100);
   }
 
   async function refresh() {
@@ -659,6 +676,7 @@
     render();
     return state.entries.length;
   };
+  window.__agRadarNavigate = navigate;
   window.__agRadarState = () => ({
     filter: state.filter,
     entries: state.entries.map((entry) => ({

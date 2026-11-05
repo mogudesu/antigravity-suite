@@ -19,9 +19,16 @@ const readline = require("readline");
 const { Bridge, BridgeError, MARKER } = require("./bridge");
 const { TOOLS, findTool, timeoutFor } = require("./tools");
 const { runBrowserLaunch } = require("./launch");
+const {
+  getRecordingsDir,
+  saveRecording,
+  listRecordings,
+  loadRecording,
+  interpolateSteps,
+} = require("./recordings");
 
 const SERVER_NAME = "antigravity-browser-bridge";
-const SERVER_VERSION = "1.6.0";
+const SERVER_VERSION = "1.7.0";
 const ROOT = path.join(__dirname, "..");
 const STATUS_TIMEOUT_MS = 1500;
 const TAKEOVER_WAIT_MS = 1500;
@@ -161,7 +168,125 @@ function createBridge() {
       const list = bridge ? bridge.list() : [];
       log(list.length ? "已连接扩展：" + list.map((c) => `${c.browser} v${c.version}`).join("、") : "当前没有扩展连接");
     },
+    onRecordDone: (rawRec) => {
+      try {
+        const saved = saveRecording(rawRec);
+        log(`收到浏览器 HUD 完成的录制：${saved.recordingId}（${saved.stepCount} 步），已保存至 ${saved.filePath}`);
+      } catch (e) {
+        log("保存 HUD 录制失败：" + ((e && e.message) || e));
+      }
+    },
+    onToolCall: (name, args, timeoutMs) => executeLeaderTool(name, args, timeoutMs),
   });
+}
+
+async function executeLeaderTool(name, args, timeoutMs) {
+  if (!bridge || !bridge.started) throw new BridgeError("BRIDGE_UNAVAILABLE", bridgeError || "桥接尚未就绪");
+
+  if (name === "browser_record_stop") {
+    const extRes = await bridge.call("browser_record_stop", args, timeoutMs);
+    if (!extRes || extRes.ok === false || !extRes.recording) {
+      return extRes;
+    }
+    if (args && args.save === false) {
+      return extRes;
+    }
+    const saved = saveRecording(extRes.recording, { title: args && args.title });
+    return {
+      ok: true,
+      status: extRes.status || "stopped",
+      recordingId: saved.recordingId,
+      title: saved.title,
+      filePath: saved.filePath,
+      stepCount: saved.stepCount,
+      suggestedParameters: saved.suggestedParameters,
+      userNotes: saved.userNotes,
+      extractTargets: saved.extractTargets,
+      recording: saved.recording,
+    };
+  }
+
+  if (name === "browser_record_list") {
+    const action = (args && args.action) || "status";
+    if (action === "list") {
+      const items = listRecordings(args && args.limit);
+      return {
+        ok: true,
+        action: "list",
+        recordingsDir: getRecordingsDir(),
+        count: items.length,
+        recordings: items,
+      };
+    }
+    if (action === "get") {
+      const targetId = (args && args.recordingId) || "latest";
+      let rec = loadRecording(targetId);
+      if (!rec && bridge.list().length > 0) {
+        try {
+          const ext = await bridge.call("browser_record_list", { browser: args && args.browser }, 5000);
+          if (ext && ext.lastCompletedRecording) {
+            rec = saveRecording(ext.lastCompletedRecording).recording;
+          }
+        } catch (e) { /* ignore */ }
+      }
+      if (!rec) {
+        return { ok: false, error: "未找到指定的录制记录：" + targetId };
+      }
+      return {
+        ok: true,
+        action: "get",
+        recordingId: rec.recordingId,
+        recording: rec,
+      };
+    }
+    // action === "status"
+    let extStatus = null;
+    if (bridge.list().length > 0) {
+      try {
+        extStatus = await bridge.call("browser_record_list", { browser: args && args.browser }, 5000);
+        if (extStatus && extStatus.lastCompletedRecording) {
+          const existing = loadRecording(extStatus.lastCompletedRecording.recordingId);
+          if (!existing) saveRecording(extStatus.lastCompletedRecording);
+        }
+      } catch (e) { /* ignore */ }
+    }
+    const recent = listRecordings(5);
+    return {
+      ok: true,
+      action: "status",
+      recordingsDir: getRecordingsDir(),
+      activeRecording: (extStatus && extStatus.activeRecording) || null,
+      latestSaved: recent[0] || null,
+      recentRecordings: recent,
+    };
+  }
+
+  if (name === "browser_record_replay") {
+    let rawSteps = Array.isArray(args && args.steps) ? args.steps : null;
+    let paramDefs = {};
+    let sourceTitle = "";
+    if (!rawSteps || !rawSteps.length) {
+      const idOrPath = (args && (args.workflowPath || args.recordingId)) || "latest";
+      const loaded = loadRecording(idOrPath);
+      if (!loaded || !Array.isArray(loaded.steps) || !loaded.steps.length) {
+        return {
+          ok: false,
+          error: "找不到可回放的录制步骤（" + idOrPath + "）。请提供有效的 recordingId、workflowPath 或 steps 数组。",
+        };
+      }
+      rawSteps = loaded.steps;
+      paramDefs = loaded.parameters || loaded.suggestedParameters || {};
+      sourceTitle = loaded.title || loaded.recordingId || "";
+    }
+    const interpolated = interpolateSteps(rawSteps, (args && args.vars) || {}, paramDefs);
+    const replayRes = await bridge.call("browser_record_replay", Object.assign({}, args, { steps: interpolated }), timeoutMs);
+    return Object.assign({
+      sourceTitle: sourceTitle || undefined,
+      appliedVars: (args && args.vars) || {},
+    }, replayRes);
+  }
+
+  return bridge.call(name, args, timeoutMs);
 }
 
 /* ------------------------------------------------- 访问 Leader 的本地 HTTP */
@@ -297,8 +422,7 @@ async function tryTakeover(reason) {
 
 async function callTool(name, args, timeoutMs) {
   if (mode === "leader") {
-    if (!bridge || !bridge.started) throw new BridgeError("BRIDGE_UNAVAILABLE", bridgeError || "桥接尚未就绪");
-    return bridge.call(name, args, timeoutMs);
+    return executeLeaderTool(name, args, timeoutMs);
   }
   if (mode === "follower") {
     try {
@@ -306,7 +430,7 @@ async function callTool(name, args, timeoutMs) {
     } catch (e) {
       if (!isLeaderGone(e)) throw e;
       const tookOver = await tryTakeover(e.code || e.message);
-      if (tookOver) return bridge.call(name, args, timeoutMs);
+      if (tookOver) return executeLeaderTool(name, args, timeoutMs);
       try {
         return await relayCall(name, args, timeoutMs);
       } catch (e2) {

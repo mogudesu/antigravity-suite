@@ -112,13 +112,14 @@ export function sessionId(event) {
   return value ? String(value) : null;
 }
 
-export function openStore() {
+export function openStore({ light = false } = {}) {
   // Hooks receive the same --data-dir / --mirror-dir flags as the MCP server,
   // so a hook and the server can never disagree about where memory lives.
   return openEngine({
     dataDir: store.resolveDataDir(),
     mirrorDir: store.resolveMirrorDir(),
     register: !store.hasExplicitStore(),
+    light,
   });
 }
 

@@ -13,3 +13,4 @@
 9. **验证命令用 dry-run**：需要确认浏览器启动参数时使用 `browser_launch(..., dryRun: true)`，不要在无人值守测试中真正拉起浏览器窗口。
 10. **隐私与安全**：只执行用户明确要求的页面操作；不要读取、导出或提交与任务无关的账号、密码、支付与隐私数据。受保护页面（`edge://`、`chrome://`、扩展商店、PDF 阅读器）上的失败是预期行为，应改用普通网页。
 11. **超时处理**：`TIMEOUT` 多由系统弹窗、权限框或页面脚本阻塞引起；先请用户处理弹窗，再用 `browser_status` / `browser_snapshot` 恢复，不要盲目重试同一动作。
+12. **RPA 录制与回放（`browser-record-replay`）**：当用户要求“录制我的浏览器操作”、“演示一遍生成 Skill”或“回放录制流程”时，读取 `browser-record-replay` 技能，用 `browser_record_start` / `browser_record_stop` / `browser_record_list` / `browser_record_replay` 完成录制、参数提炼、编译生成专属 Skill（含 `SKILL.md` 与 `workflow.recording.json`）及快放自愈闭环。

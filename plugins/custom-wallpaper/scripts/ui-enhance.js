@@ -835,25 +835,39 @@
     }
   }
 
-  function updateSidebarHandle() {
+  // One forced layout in Antigravity's document costs ~45ms, so the sidebar rail geometry is cached
+  // and only re-measured when something could have moved it (collapse animation, resize, pane drag).
+  let sidebarGeom = null;
+  const SIDEBAR_GEOM_MS = 500;
+  const SIDEBAR_GEOM_SAFE_MS = 2500;
+
+  function updateSidebarHandle(force) {
     const handle = document.getElementById('ag-sidebar-handle');
     if (!handle) return;
-    const settings = document.querySelector('[data-testid="settings-button"]');
-    const sidebar = settings ? settings.closest('.bg-sidebar') : null;
-    const wrapper = sidebar?.parentElement?.parentElement || null;
-    const rect = wrapper ? wrapper.getBoundingClientRect() : null;
+    const now = performance.now();
+    const widthKey = window.innerWidth + 'x' + window.innerHeight;
+    const mayRefresh = !sidebarGeom || now - sidebarGeom.at > SIDEBAR_GEOM_MS;
+    const mustRefresh = !sidebarGeom || sidebarGeom.widthKey !== widthKey || now - sidebarGeom.at > SIDEBAR_GEOM_SAFE_MS;
+    if (force === true || (mayRefresh && mustRefresh)) {
+      const settings = document.querySelector('[data-testid="settings-button"]');
+      const sidebar = settings ? settings.closest('.bg-sidebar') : null;
+      const wrapper = sidebar?.parentElement?.parentElement || null;
+      const rect = wrapper ? wrapper.getBoundingClientRect() : null;
+      sidebarGeom = { at: now, widthKey, right: rect ? rect.right : 360, wide: !!rect && rect.width > 80 };
+    }
     if (typeof window.__agSidebarCollapsedState !== 'boolean') {
-      window.__agSidebarCollapsedState = !(rect && rect.width > 80);
+      window.__agSidebarCollapsedState = !sidebarGeom.wide;
     }
     const expanded = !window.__agSidebarCollapsedState;
-    const left = expanded
-      ? Math.min(window.innerWidth - 12, Math.max(0, (rect?.right || 360) - 1))
-      : 4;
-    handle.style.left = Math.round(left) + 'px';
+    const left = expanded ? Math.min(window.innerWidth - 12, Math.max(0, sidebarGeom.right - 1)) : 4;
+    const nextLeft = Math.round(left) + 'px';
+    if (handle.style.left !== nextLeft) handle.style.left = nextLeft;
     handle.classList.toggle('is-collapsed', window.__agSidebarCollapsedState);
     const label = expanded ? '收起侧栏' : '展开侧栏';
-    handle.setAttribute('aria-label', label);
-    handle.title = label;
+    if (handle.getAttribute('aria-label') !== label) {
+      handle.setAttribute('aria-label', label);
+      handle.title = label;
+    }
   }
 
   function ensureSidebarHandle() {
@@ -888,10 +902,10 @@
 
         const started = performance.now();
         const timer = window.setInterval(() => {
-          updateSidebarHandle();
+          updateSidebarHandle(true);
           if (performance.now() - started > 560) {
             window.clearInterval(timer);
-            updateSidebarHandle();
+            updateSidebarHandle(true);
           }
         }, 16);
       });
@@ -2679,7 +2693,8 @@
 
   function minimapDotTop(map, index, total) {
     const trackTop = 30;
-    const trackHeight = Math.max(40, (map.clientHeight || 0) - trackTop - 10);
+    // Cached height keeps this layout-free; ensureChatMinimap refreshes it whenever it reads the viewport.
+    const trackHeight = Math.max(40, (Number(map.dataset.trackHeight) || 0) - trackTop - 10);
     return trackTop + ((index + 0.5) / Math.max(1, total)) * trackHeight;
   }
 
@@ -2702,10 +2717,13 @@
     const map = document.getElementById('ag-chat-minimap');
     const list = document.getElementById('ag-minimap-list');
     if (!map || !list) return;
-    const rect = map.getBoundingClientRect();
-    list.style.left = Math.max(8, rect.left - 298) + 'px';
-    list.style.top = Math.max(8, rect.top) + 'px';
-    list.style.maxHeight = Math.max(180, Math.min(620, window.innerHeight - Math.max(8, rect.top) - 16)) + 'px';
+    // Cached rail box keeps an open picker from forcing a layout on every scan.
+    const left = Number(map.dataset.trackLeft);
+    const top = Number(map.dataset.trackTop);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return;
+    list.style.left = Math.max(8, left - 298) + 'px';
+    list.style.top = Math.max(8, top) + 'px';
+    list.style.maxHeight = Math.max(180, Math.min(620, window.innerHeight - Math.max(8, top) - 16)) + 'px';
   }
 
   function renderMinimapList(turns, activeIndex) {
@@ -2739,38 +2757,48 @@
     }
   }
 
-  function updateMinimapTurnActive(turns, map) {
-    const dots = Array.from(map.querySelectorAll('.ag-minimap-dot'));
-    const activeIndex = turns.findIndex((turn) => turn.getAttribute('aria-current') === 'true' || turn.getAttribute('data-active') === 'true');
-    dots.forEach((dot, index) => dot.classList.toggle('is-current', index === activeIndex));
+  // innerText forces layout, so previews are captured lazily — only for a turn the user is looking at.
+  function fillTurnPreview(turn) {
+    if (!turn || turn.dataset.agPreview) return;
+    const step = turn.querySelector('[data-testid="user-input-step"]');
+    const text = cleanPromptText((step || turn).innerText || '').slice(0, 220);
+    if (text) turn.dataset.agPreview = text;
+  }
 
-    const head = map.querySelector('.ag-minimap-head');
-    if (head) {
-      head.textContent = activeIndex >= 0 ? String(activeIndex + 1) : '☰';
-      head.title = '对话选择（' + (activeIndex >= 0 ? (activeIndex + 1) + ' / ' + turns.length : turns.length + ' 轮') + '）';
+  function updateMinimapTurnActive(turns, map) {
+    const activeIndex = turns.findIndex((turn) => turn.getAttribute('aria-current') === 'true' || turn.getAttribute('data-active') === 'true');
+    if (map.dataset.activeTurn !== String(activeIndex) || map.dataset.turnCount !== String(turns.length)) {
+      map.dataset.activeTurn = String(activeIndex);
+      map.dataset.turnCount = String(turns.length);
+      map.querySelectorAll('.ag-minimap-dot').forEach((dot, index) => dot.classList.toggle('is-current', index === activeIndex));
+      const head = map.querySelector('.ag-minimap-head');
+      if (head) {
+        head.textContent = activeIndex >= 0 ? String(activeIndex + 1) : '☰';
+        head.title = '对话选择（' + (activeIndex >= 0 ? (activeIndex + 1) + ' / ' + turns.length : turns.length + ' 轮') + '）';
+      }
     }
 
     const thumb = map.querySelector('.ag-minimap-thumb');
     if (thumb) {
       if (activeIndex >= 0) {
-        thumb.style.display = 'block';
-        thumb.style.top = minimapDotTop(map, activeIndex, turns.length) + 'px';
-      } else {
+        const top = minimapDotTop(map, activeIndex, turns.length) + 'px';
+        if (thumb.style.top !== top) thumb.style.top = top;
+        if (thumb.style.display !== 'block') thumb.style.display = 'block';
+      } else if (thumb.style.display !== 'none') {
         thumb.style.display = 'none';
       }
     }
 
-    const activeMessage = document.querySelector('[role="article"][aria-label="User message"]');
-    if (activeIndex >= 0 && activeMessage && turns[activeIndex] && !turns[activeIndex].dataset.agPreview) {
-      const step = activeMessage.querySelector('[data-testid="user-input-step"]');
-      const text = cleanPromptText(step?.innerText || activeMessage.innerText || '').slice(0, 220);
-      if (text) turns[activeIndex].dataset.agPreview = text;
+    // The picker list and its previews are only worth building while it is actually open.
+    const list = document.getElementById('ag-minimap-list');
+    if (list?.classList.contains('is-visible')) {
+      fillTurnPreview(turns[activeIndex]);
+      renderMinimapList(turns, activeIndex);
     }
-
-    renderMinimapList(turns, activeIndex);
   }
 
   function showMinimapTip(dot, turn, tip) {
+    fillTurnPreview(turn);
     const label = turn.getAttribute('aria-label') || ('Turn ' + (Number(dot.dataset.index) + 1));
     const preview = turn.dataset.agPreview || '';
     tip.innerHTML = '<strong>' + escapeHtml(label) + '</strong><p>' + escapeHtml(preview || '点击跳转到该轮对话') + '</p>';
@@ -2780,24 +2808,27 @@
     tip.classList.add('is-visible');
   }
 
-  function minimapNodeVisible(node) {
-    if (!node) return false;
-    const rect = node.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return false;
-    const style = getComputedStyle(node);
-    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) > 0;
-  }
+  const MINIMAP_OVERLAY_SELECTORS = [
+    '#ag-memory-page.is-open',
+    '.settings-modal-container',
+    '.settings-modal-backdrop',
+    '[data-testid="artifact-view"]',
+    '[role="dialog"][aria-modal="true"]'
+  ];
 
   /** The minimap is a chat-only rail; it must not leak through overlays or the right pane. */
   function chatMinimapCovered() {
-    if (minimapNodeVisible(document.querySelector('#ag-memory-page.is-open'))) return true;
-    const overlays = [
-      '.settings-modal-container',
-      '.settings-modal-backdrop',
-      '[data-testid="artifact-view"]',
-      '[role="dialog"][aria-modal="true"]'
-    ];
-    return overlays.some((selector) => Array.from(document.querySelectorAll(selector)).some(minimapNodeVisible));
+    // Existence check first: a plain chat has none of these, so the hot path pays no style/layout at all.
+    const candidates = [];
+    for (const selector of MINIMAP_OVERLAY_SELECTORS) {
+      const found = document.querySelector(selector);
+      if (found) candidates.push(found);
+    }
+    if (!candidates.length) return false;
+    // checkVisibility with contentVisibilityAuto disabled reads style, not layout.
+    return candidates.some((el) => (typeof el.checkVisibility === 'function'
+      ? el.checkVisibility({ contentVisibilityAuto: false, opacity: true, visibility: true })
+      : Number(getComputedStyle(el).opacity) > 0));
   }
 
   function ensureChatMinimap() {
@@ -2853,6 +2884,7 @@
         list.classList.add('is-visible');
         head.classList.add('is-open');
         head.setAttribute('aria-expanded', 'true');
+        updateMinimapTurnActive(minimapTurns(), node);
       });
       node.appendChild(head);
     }
@@ -2863,18 +2895,32 @@
       node.appendChild(thumb);
     }
 
-    const rect = viewport.getBoundingClientRect();
-    const contentRect = content ? content.getBoundingClientRect() : null;
-    const height = Math.max(140, rect.height - 24);
-    const left = contentRect
-      ? Math.round(Math.min(rect.right - 34, contentRect.right + 10))
-      : Math.round(rect.right - 30);
-    node.style.left = left + 'px';
-    node.style.top = Math.round(rect.top + 12) + 'px';
-    node.style.height = height + 'px';
+    // Geometry reads force a full relayout of Antigravity's deep document (~45ms each), so the rail
+    // re-measures only when something could have moved it; a 2.5s safety net catches manual pane drags.
+    const now = performance.now();
+    const sinceGeom = node.dataset.geomAt ? now - Number(node.dataset.geomAt) : Infinity;
+    const sizeKey = window.innerWidth + 'x' + window.innerHeight + ':' + turns.length;
+    if (sinceGeom > 500 && (node.dataset.sizeKey !== sizeKey || sinceGeom > 2500)) {
+      const rect = viewport.getBoundingClientRect();
+      const contentRect = content ? content.getBoundingClientRect() : null;
+      const measured = Math.max(140, rect.height - 24);
+      const left = contentRect
+        ? Math.round(Math.min(rect.right - 34, contentRect.right + 10))
+        : Math.round(rect.right - 30);
+      node.dataset.geomAt = String(Math.round(now));
+      node.dataset.sizeKey = sizeKey;
+      node.dataset.trackHeight = String(Math.round(measured));
+      node.dataset.trackLeft = String(left);
+      node.dataset.trackTop = String(Math.round(rect.top + 12));
+      node.style.left = left + 'px';
+      node.style.top = Math.round(rect.top + 12) + 'px';
+      node.style.height = measured + 'px';
+    }
     node.classList.add('is-visible');
 
-    const signature = turns.length + ':' + Math.round(height) + ':' + left;
+    const height = Number(node.dataset.trackHeight) || 140;
+    const left = Number(node.dataset.trackLeft) || 0;
+    const signature = turns.length + ':' + height + ':' + left;
     if (node.dataset.signature !== signature) {
       node.dataset.signature = signature;
       node.querySelectorAll('.ag-minimap-dot').forEach((dot) => dot.remove());
@@ -2926,6 +2972,8 @@
         if (event.key === 'Escape') closeMinimapList();
       });
       window.addEventListener('resize', () => {
+        const rail = document.getElementById('ag-chat-minimap');
+        if (rail) rail.dataset.geomAt = '';
         const current = document.getElementById('ag-minimap-list');
         if (current?.classList.contains('is-visible')) positionMinimapList();
       }, { passive: true });
@@ -2961,7 +3009,7 @@
         return seed / 2147483647;
       };
       const stars = [];
-      for (let index = 0; index < 16; index += 1) {
+      for (let index = 0; index < 10; index += 1) {
         const sparkle = index % 4 === 0;
         const left = 2 + rand() * 96;
         const top = 2 + rand() * 92;
@@ -3029,17 +3077,30 @@
       return Object.assign({ mode: 'orbit-meteor', intensity: 0.85, frequency: 0.6 }, window.__AG_STAR_CONFIG || {});
     }
 
-    function composerRect() {
+    let composerBox = null;
+    let composerBoxAt = 0;
+
+    function composerRect(now) {
+      // drawOrbit runs every animation frame and a rect read can force a full relayout,
+      // so the composer box is cached and only re-measured twice a second.
+      if (composerBoxAt && now - composerBoxAt < 500) return composerBox;
+      composerBoxAt = now;
       const node = document.getElementById('antigravity.agentSidePanelInputBox') ||
         document.querySelector('.surface-composer') ||
         document.querySelector('[data-testid="composer"]');
-      if (!node) return null;
+      if (!node) {
+        composerBox = null;
+        return null;
+      }
       const rect = node.getBoundingClientRect();
-      return rect.width > 80 && rect.height > 20 ? rect : null;
+      composerBox = rect.width > 80 && rect.height > 20
+        ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }
+        : null;
+      return composerBox;
     }
 
     function resize() {
-      dpr = Math.min(1.25, window.devicePixelRatio || 1);
+      dpr = Math.min(1, window.devicePixelRatio || 1);
       width = window.innerWidth;
       height = window.innerHeight;
       canvas.width = Math.max(1, Math.floor(width * dpr));
@@ -3047,6 +3108,7 @@
       canvas.style.width = width + 'px';
       canvas.style.height = height + 'px';
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      composerBoxAt = 0;
     }
 
     function drawStar(x, y, radius, rotation, alpha, color) {
@@ -3117,7 +3179,7 @@
 
     function drawOrbit(now) {
       if (state.mode !== 'orbit-meteor') return;
-      const rect = composerRect();
+      const rect = composerRect(now);
       if (!rect) return;
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
@@ -3210,7 +3272,7 @@
     function frame(now) {
       raf = 0;
       if (document.hidden || window.__agUiDisabled || state.mode === 'off' || state.mode === 'minimal') return;
-      if (now - lastDraw < 32) {
+      if (now - lastDraw < 40) {
         raf = requestAnimationFrame(frame);
         return;
       }
@@ -3767,7 +3829,7 @@
     scanTimer = window.setTimeout(() => {
       scanTimer = 0;
       scan();
-    }, 80);
+    }, 240);
   }
 
   function shouldIgnoreMutation(mutation) {

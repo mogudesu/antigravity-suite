@@ -32,10 +32,10 @@ KEY_COLORREF = 0x00FF00FF  # COLORREF is 0x00BBGGRR
 
 CURSOR_WINDOW = 176
 BANNER_FONT_PX = 16
-# Sticky control session: once the first action draws the overlay, the cursor,
-# screen frame and banner stay up until the overlay host loses its last client
-# (MCP server shutdown / Antigravity exit) or the user disables the overlay.
-IDLE_HIDE_SECONDS = 24 * 60 * 60.0
+# The control visuals stay up through an active session, then fade out after a
+# quiet stretch so a full-screen topmost layered window cannot sit in DWM for
+# the rest of the day. The next action fades it straight back in.
+IDLE_HIDE_SECONDS = 180.0
 
 ENDPOINT_NAME = "overlay-endpoint.json"
 LOCK_NAME = "overlay.lock"

@@ -138,15 +138,21 @@ export class MnemonEngine {
     };
   }
 
-  init() {
+  init({ light = false } = {}) {
     const p = this.p;
     for (const dir of [
       p.root, p.runtimeDir, p.revisions, p.snapshots, p.spacesDir, p.documentsDir,
       p.docRevisions, p.docArchive, path.dirname(p.candidatesFile), p.receiptsDir, p.backupsDir,
     ]) store.ensureDir(dir);
+    // Read-only hooks fire on every tool step; a full heal + two-drive mirror sync
+    // there costs more than the recall it produces, so it is throttled by a stamp.
+    const healStamp = path.join(this.dataDir, '.last-heal');
+    const stamp = Number(store.readText(healStamp, '0'));
+    const recentlyHealed = Number.isFinite(stamp) && stamp > 0 && Date.now() - stamp < 10 * 60 * 1000;
+    const skipHeavy = light && recentlyHealed;
     // Startup self-heal runs before anything is seeded, so a damaged volume is
     // restored from the mirror or the newest snapshot instead of being replaced.
-    const heal = this.verifyAndHeal({ phase: 'startup' });
+    const heal = skipHeavy ? { healed: [], created: [] } : this.verifyAndHeal({ phase: 'startup' });
     if (!store.exists(p.config)) {
       store.writeJSON(p.config, mergeConfig({ ...DEFAULT_CONFIG, createdAt: store.nowISO() }, this._pendingConfig));
     }
@@ -157,8 +163,11 @@ export class MnemonEngine {
     // Only callers using the implicit ~/.mnemon location write the registry;
     // an explicit store is self-describing and must not touch other paths.
     if (this.registerStore) store.registerDataDir(this.dataDir, { workspaceDir: this.workspaceDir, mirrorDir: this.mirrorDir });
-    this.syncMirror();
-    if (heal.healed.length || heal.created.length) this.snapshotDaily();
+    if (!skipHeavy) {
+      this.syncMirror();
+      store.writeText(healStamp, String(Date.now()));
+      if (heal.healed.length || heal.created.length) this.snapshotDaily();
+    }
     return this;
   }
 
@@ -473,7 +482,7 @@ export class MnemonEngine {
     };
   }
 
-  searchMemories(query, { space = null, limit = 8, minScore = 0.01 } = {}) {
+  searchMemories(query, { space = null, limit = 8, minScore = 0.01, touch = true } = {}) {
     const queryTokens = tokens(query);
     if (!queryTokens.length) return [];
     const spaces = space ? [this.ensureSpace(space)] : this._activeSpaces();
@@ -500,15 +509,19 @@ export class MnemonEngine {
     });
 
     const hits = scored.filter((m) => m.score > minScore).sort((a, b) => b.score - a.score).slice(0, limit);
-    const touched = new Set();
-    for (const hit of hits) {
-      const found = this._locate(hit.id);
-      if (!found) continue;
-      found.record.accessCount = (found.record.accessCount || 0) + 1;
-      found.record.accessedAt = store.nowISO();
-      touched.add(found.space);
+    // Automatic recall is a read; recording usage would rewrite the space, fsync
+    // both drives and re-decode two snapshots on every single tool step.
+    if (touch) {
+      const touched = new Set();
+      for (const hit of hits) {
+        const found = this._locate(hit.id);
+        if (!found) continue;
+        found.record.accessCount = (found.record.accessCount || 0) + 1;
+        found.record.accessedAt = store.nowISO();
+        touched.add(found.space);
+      }
+      for (const name of touched) this._flushSpace(name);
     }
-    for (const name of touched) this._flushSpace(name);
     return hits.map(({ id, space, text, tags, entities, score, updatedAt, accessCount, pinned }) => ({ id, space, text, tags, entities, score, updatedAt, accessCount, pinned: !!pinned }));
   }
 
@@ -765,7 +778,7 @@ export class MnemonEngine {
     if (residentBase.length > budgetChars) residentBase = `${truncate(residentBase, budgetChars)}\n…(resident memory truncated to the ${budgetChars}-character budget)`;
     const resident = [personaText, residentBase].filter(Boolean).join('\n\n');
 
-    const relevant = prompt ? this.searchMemories(prompt, { limit: cfg.searchBudget }) : [];
+    const relevant = prompt ? this.searchMemories(prompt, { limit: cfg.searchBudget, touch: false }) : [];
     const documents = prompt ? this.searchDocuments(prompt, { limit: cfg.documentBudget }) : [];
     const pinned = this._allMemories()
       .filter((m) => m.pinned)
@@ -1107,14 +1120,19 @@ export class MnemonEngine {
    * One verified snapshot per day, written to both drives, retaining the newest
    * `snapshotRetention` (30) days on each.
    */
-  snapshotDaily() {
+  snapshotDaily({ verify = false } = {}) {
     const day = store.nowISO().slice(0, 10);
     const name = this._snapshotName(day);
     const targets = [path.join(this.p.mirrorSnapshots, name), path.join(this.p.snapshots, name)];
     let created = false;
     let payload = null;
     for (const target of targets) {
-      if (this.verifySnapshot(target).valid) continue;
+      // Decoding both daily snapshots (gunzip + parse + sha256) on every write was
+      // the hot path cost; presence is enough until an explicit verify is asked for.
+      const inPlace = verify
+        ? this.verifySnapshot(target).valid
+        : store.statSize(target) > 64;
+      if (inPlace) continue;
       if (!payload) {
         payload = this._packBuffer();
         const gz = zlib.gzipSync(payload, { level: 9 });
@@ -1402,6 +1420,6 @@ export class MnemonEngine {
   }
 }
 
-export function openEngine({ dataDir, mirrorDir = null, workspaceDir = null, config = {}, register = false } = {}) {
-  return new MnemonEngine({ dataDir: dataDir || store.resolveDataDir(), mirrorDir: mirrorDir || store.resolveMirrorDir(), workspaceDir, config, register }).init();
+export function openEngine({ dataDir, mirrorDir = null, workspaceDir = null, config = {}, register = false, light = false } = {}) {
+  return new MnemonEngine({ dataDir: dataDir || store.resolveDataDir(), mirrorDir: mirrorDir || store.resolveMirrorDir(), workspaceDir, config, register }).init({ light });
 }

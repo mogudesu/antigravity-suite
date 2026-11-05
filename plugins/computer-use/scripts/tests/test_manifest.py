@@ -70,7 +70,7 @@ def run():
     suite.check("the logo is declared", bool(logo))
     suite.check("the logo exists", os.path.isfile(os.path.join(ROOT, logo or "")))
     if logo and os.path.isfile(os.path.join(ROOT, logo)):
-        if (logo or '').endswith('.svg'):
+        if logo.lower().endswith(".svg"):
             svg = read(logo)
             suite.check("the logo is an svg", svg.lstrip().startswith("<svg"))
             box = re.search(r'viewBox="([\d.\s-]+)"', svg)
@@ -79,7 +79,10 @@ def run():
                 suite.equal("the logo viewBox is square", parts[2], parts[3])
             suite.check("the logo carries a title for screen readers", "<title" in svg)
         else:
-            suite.check("the logo is a valid image", os.path.isfile(os.path.join(ROOT, logo or '')))
+            # A raster logo must not be decoded as text; only its signature is checkable.
+            with io.open(os.path.join(ROOT, logo), "rb") as handle:
+                signature = handle.read(8)
+            suite.check("the logo is a png", signature.startswith(b"\x89PNG"))
 
     # --- mcp.json ---------------------------------------------------------
     mcp = load("mcp.json")

@@ -164,8 +164,8 @@ def run():
     suite.check("the banner has no quotes", '"' not in BANNER_TEXT and "'" not in BANNER_TEXT)
     suite.check("the banner has no surrounding whitespace",
                 BANNER_TEXT == BANNER_TEXT.strip() and "\n" not in BANNER_TEXT)
-    suite.check("the overlay is sticky for a control session", IDLE_HIDE_SECONDS >= 3600,
-                IDLE_HIDE_SECONDS)
+    suite.check("the overlay fades out after a quiet stretch instead of sticking all day",
+                60.0 <= IDLE_HIDE_SECONDS <= 300.0, IDLE_HIDE_SECONDS)
     probe_bridge = OverlayBridge(spawn=False)
     suite.equal("the bridge keeps the sticky overlay connected by default",
                 probe_bridge.idle_close, 0.0)

@@ -7,7 +7,7 @@
   if (window.__agStarlightInstalled) return;
   window.__agStarlightInstalled = true;
 
-  const VERSION = "1.1.0";
+  const VERSION = "1.1.1";
   const SIDECAR = "http://127.0.0.1:" + (window.__AG_SIDECAR_PORT || 39290);
   const STYLE_ID = "ag-starlight-style";
   const WINDOW_ID = "ag-starlight-window";

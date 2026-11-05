@@ -46,7 +46,7 @@ class Mcp:
             cwd=str(ROOT),
             env=dict(os.environ, AG_BRIDGE_PORT=str(port)),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
+            text=True, bufsize=1, encoding="utf-8", errors="replace",
         )
         self.id = 0
         self.stderr = []

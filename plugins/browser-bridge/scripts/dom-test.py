@@ -183,6 +183,22 @@ def main():
         enter = page.evaluate("__AG_PA.pressJs({key: 'Enter'})")
         check("Enter 兜底能找到表单", enter.get("ok") is True, json.dumps(enter))
 
+        section("RPA 录制模块与 HUD 隔离")
+        rec_src = (ROOT / "extension" / "recorder-page.js").read_text(encoding="utf-8")
+        page.add_script_tag(content=rec_src)
+        rec_started = page.evaluate("__AGBB_RECORDER.start({sessionId: 'rec-dom-1', stepCount: 2})")
+        check("recorder-page 启动成功并创建 Shadow HUD", rec_started.get("ok") is True and page.evaluate("!!document.getElementById('agbb-recorder-hud-host')"))
+        snap_with_hud = page.evaluate("__AG_PA.snapshot({})")
+        check("录制胶囊 HUD 不会污染 snapshot 输出", "RPA录制中" not in snap_with_hud["snapshot"] and "备注规则" not in snap_with_hud["snapshot"], snap_with_hud["snapshot"])
+        loc_bundle = page.evaluate("__AGBB_RECORDER.buildLocator(document.getElementById('username'))")
+        check("buildLocator 提取四维定位锚点", loc_bundle.get("selector") == "#username" and loc_bundle.get("semantic", {}).get("role") == "textbox", json.dumps(loc_bundle, ensure_ascii=False))
+        fb_locate = page.evaluate("__AG_PA.locate({selector: '#non-existent-id', fallbacks: ['#username']})")
+        check("resolve 支持 fallbacks 备选选择器定位", fb_locate.get("ok") is True and fb_locate.get("tag") == "input", json.dumps(fb_locate, ensure_ascii=False))
+        ext_res = page.evaluate("__AG_PA.extractData({selector: '#out'})")
+        check("extractData 提取元素文本成功", ext_res.get("ok") is True and "submitted" in ext_res.get("text", ""), json.dumps(ext_res, ensure_ascii=False))
+        rec_stopped = page.evaluate("__AGBB_RECORDER.stop()")
+        check("recorder-page 停止后移除 HUD", rec_stopped.get("ok") is True and not page.evaluate("!!document.getElementById('agbb-recorder-hud-host')"))
+
         browser.close()
 
     print(f"\n结果：{passed} 通过 / {failed} 失败")

@@ -1,6 +1,6 @@
 # Antigravity 星夜美化 · Starlight Theme & Enhancer
 
-[![Version](https://img.shields.io/badge/version-1.0.0-gold.svg)](plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.1-gold.svg)](plugin.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Google%20Antigravity-orange.svg)](https://antigravity.google)
 

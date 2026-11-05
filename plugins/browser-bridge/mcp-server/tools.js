@@ -259,9 +259,72 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "browser_record_start",
+    description: "开启浏览器 RPA 录制模式（对标豆包浏览器录制与回放）。在目标标签页注入录制监听与右下角悬浮录制胶囊 HUD，实时记录用户的点击、输入（自动防抖合并，密码自动脱敏）、下拉选择、按键、滚动与跨页跳转，并支持用户在页面胶囊中添加规则备注（💬）或圈选标记要提取的数据区域（🎯）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "可选：开启录制前先导航到的目标网址；省略时直接录制当前活动标签页。" },
+        title: { type: "string", description: "可选：本次录制任務的名称或意图描述。" },
+        newTab: { type: "boolean", description: "可选：是否新开标签页进行录制，默认 false。" },
+        tabId: TAB_PROP,
+        browser: BROWSER_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_record_stop",
+    description: "结束当前浏览器 RPA 录制（或拉取用户在页面悬浮胶囊/扩展弹窗中已点击完成的最近一次录制），自动对步骤去重合并、提炼可变参数候选（suggestedParameters），持久化保存到本地 recordings 目录并返回完整轨迹 JSON，供后续编译生成可复用 Skill。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "可选：覆盖或补充本次录制的标题。" },
+        save: { type: "boolean", description: "是否落盘保存到本地 recordings 目录，默认 true。" },
+        browser: BROWSER_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_record_list",
+    description: "查询浏览器 RPA 录制状态、列出本地已保存的历史录制记录，或读取某条录制记录的完整 JSON 步骤详情（含 suggestedParameters、userNotes、extractTargets）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["status", "list", "get"], description: "status 查看当前录制状态与最新录制；list 列出历史录制；get 读取指定录制完整详情。默认 status。" },
+        recordingId: { type: "string", description: "action=get 时要读取的 recordingId 或工作流 JSON 路径；省略时默认读取最新一条（latest）。" },
+        limit: { type: "integer", description: "action=list 时返回的最大条数，默认 20。" },
+        browser: BROWSER_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_record_replay",
+    description: "确定性快速回放已录制的浏览器 RPA 轨迹或 Skill 工作流（支持传入 vars 替换 {{变量}} 占位符）。按多重定位锚点（selector -> fallbacks -> semantic text）自动执行导航、点击、输入、下拉选择与数据提取；若某一步因页面改版或弹窗阻塞失败，立即返回中断断点（failedStepIndex）供 Agent 调用 browser_snapshot 视觉接管自愈。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        recordingId: { type: "string", description: "要回放的录制 ID（如 rec-xxx 或 latest）。与 workflowPath / steps 三选一。" },
+        workflowPath: { type: "string", description: "Skill 目录下的 workflow.recording.json 绝对路径。" },
+        steps: { type: "array", description: "直接传入的步骤数组（可选，优先于 recordingId）。", items: { type: "object" } },
+        vars: { type: "object", description: "参数化变量键值对（如 {\"keyword\": \"机械键盘\"}），用于替换步骤中的 {{变量名}}。" },
+        stepDelayMs: { type: "integer", description: "每步之间的间隔毫秒数，默认 400。" },
+        stopOnError: { type: "boolean", description: "遇到单步失败时是否立即暂停并交还 Agent 接管，默认 true。" },
+        tabId: TAB_PROP,
+        browser: BROWSER_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
-const LONG_TOOLS = new Set(["browser_screenshot", "browser_wait_for", "browser_open", "browser_history", "browser_launch"]);
+const LONG_TOOLS = new Set([
+  "browser_screenshot", "browser_wait_for", "browser_open", "browser_history",
+  "browser_launch", "browser_record_start", "browser_record_replay",
+]);
 
 function findTool(name) {
   return TOOLS.find((t) => t.name === name);
@@ -270,6 +333,7 @@ function findTool(name) {
 function timeoutFor(name, args) {
   if (name === "browser_launch") return Math.min(Number((args && args.waitConnectMs) || 8000) + 5000, 130000);
   if (name === "browser_wait_for") return Number((args && args.timeoutMs) || 15000) + 10000;
+  if (name === "browser_record_replay") return 120000;
   if (LONG_TOOLS.has(name)) return 60000;
   return 30000;
 }

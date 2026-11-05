@@ -25,7 +25,41 @@ async function render() {
   if (st.cdpTabId) lines.push("CDP 已附加 tab " + st.cdpTabId);
   if (st.lastError) lines.push("最近错误：" + st.lastError);
   $("detail").textContent = lines.join(" · ");
+
+  const rec = st.recording;
+  const lastRec = st.lastRecording;
+  const recBadge = $("rec-state");
+  const recDetail = $("rec-detail");
+  const btnStart = $("rec-start");
+  const btnStop = $("rec-stop");
+  if (rec && rec.active) {
+    recBadge.textContent = rec.paused ? "已暂停" : ("录制中 · " + (rec.stepCount || 0) + " 步");
+    recBadge.className = "rec-badge on";
+    recDetail.textContent = "会话 " + rec.recordingId + " · 可在页面右下角胶囊添加备注或标记提取";
+    btnStart.disabled = true;
+    btnStop.disabled = false;
+  } else {
+    recBadge.textContent = "待命";
+    recBadge.className = "rec-badge";
+    if (lastRec) {
+      recDetail.textContent = "最近录制：" + (lastRec.title || lastRec.recordingId) + "（共 " + (lastRec.stepCount || 0) + " 步），可在 Antigravity 中生成 Skill";
+    } else {
+      recDetail.textContent = "点击下方按钮在当前标签页开启 RPA 轨迹录制";
+    }
+    btnStart.disabled = false;
+    btnStop.disabled = true;
+  }
 }
+
+$("rec-start").onclick = async () => {
+  await send({ type: "ag:record:start", args: {} });
+  render();
+};
+
+$("rec-stop").onclick = async () => {
+  await send({ type: "ag:record:stop", args: {} });
+  render();
+};
 
 $("save").onclick = async () => {
   await send({

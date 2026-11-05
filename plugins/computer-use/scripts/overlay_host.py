@@ -735,22 +735,29 @@ class OverlayApp:
             elif self.level > self.level_target:
                 self.level = max(self.level_target, self.level - dt * 4.5)
             self._apply_level()
-            # The ring is a small layered window; redrawing its animation at
-            # 25 fps costs several percent of a core for no benefit. Events
-            # still land every tick; the decorative pulse and trail run at
-            # half rate unless a ripple or a fade is in progress.
+            # Nothing has moved for two seconds and the fade has settled: keep the
+            # 40 ms tick so the next action is still picked up immediately, but stop
+            # redrawing the ring and stop re-asserting topmost in DWM every second.
+            settled = (
+                now - self.last_event > 2.0
+                and self.level == self.level_target
+                and not self.ripples
+            )
             self._frame += 1
             animate = (
-                self._frame % 2 == 0
-                or bool(self.ripples)
-                or self.level != self.level_target
+                not settled
+                and (
+                    self._frame % 2 == 0
+                    or bool(self.ripples)
+                    or self.level != self.level_target
+                )
             )
             if animate and self.point is not None:
                 self._pulse_cursor()
                 self._redraw_trail(now)
                 self._redraw_ripples(now)
                 self._bob_banner()
-            if now - self.last_topmost > 1.0:
+            if now - self.last_topmost > (3.0 if settled else 1.0):
                 self.last_topmost = now
                 self.screen.raise_topmost()
                 self.cursor.raise_topmost()
