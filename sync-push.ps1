@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     一键将本地运行中的 Antigravity 插件变更同步到本仓库，并自动提交推送到 GitHub。
 .EXAMPLE
@@ -30,7 +30,7 @@ foreach ($item in $Mapping) {
     
     if (Test-Path $srcPath) {
         Write-Host "  -> 同步: $($item.Src) => $($item.Dest)" -ForegroundColor Gray
-        robocopy $srcPath $destPath /MIR /XD "node_modules" "__pycache__" ".git" "snapshots" /XF "*.log" "*.tmp" "*.bak" ".sidecar-lock.json" /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
+        robocopy $srcPath $destPath /MIR /XD "node_modules" "__pycache__" ".git" "snapshots" /XF "*.log" "*.tmp" "*.bak" ".sidecar-lock.json" "update-state.json" /NFL /NDL /NJH /NJS /nc /ns /np | Out-Null
     } else {
         Write-Warning "未找到本地路径: $srcPath"
     }
