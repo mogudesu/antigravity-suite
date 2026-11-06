@@ -25,7 +25,7 @@ Each plugin comes equipped with an exclusive 3D mascot avatar icon (transparent 
 | [![Computer Use](./assets/banners/computer-use.jpg)](./plugins/computer-use) | [![Mnemon](./assets/banners/mnemon.jpg)](./plugins/mnemon) |
 
 <p align="center">
-  <b>[Antigravity Remote (WeChat / QQ / Feishu Bridge)](./plugins/remote)</b><br>
+  <a href="./plugins/remote"><b>Antigravity Remote (WeChat / QQ / Feishu Bridge)</b></a><br>
   <a href="./plugins/remote"><img src="./assets/banners/antigravity-remote.jpg" width="100%" alt="Antigravity Remote" /></a>
 </p>
 

@@ -1,7 +1,7 @@
 {
   "name": "antigravity-suite",
   "version": "1.1.2",
-  "publishedAt": "2026-11-06T16:42:51.448Z",
+  "publishedAt": "2026-11-06T17:28:37.603Z",
   "notes": "Antigravity Suite: 包含最新版 antigravity-remote-mogu 热更新模块及全部五大插件",
   "components": [
     {
@@ -9,35 +9,35 @@
       "displayName": "Antigravity 星夜美化-mogu",
       "version": "1.1.2",
       "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.1.2/antigravity-custom-wallpaper-v1.1.2.zip",
-      "sha256": "2295b2be3dccd7664e8a3c30a8365c321500409a93af7995371be3264fed264e"
+      "sha256": "d96d7cbea90d27768b1f921a1a4535477172285321b090cee03e0049f9e5051f"
     },
     {
       "name": "antigravity-browser-bridge",
       "displayName": "antigravity浏览器控制与录制回放（Edge / Chrome）",
       "version": "1.7.1",
       "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.7.1/antigravity-browser-bridge-v1.7.1.zip",
-      "sha256": "5278bd02bd094d29022b78716da9f453426c23378443ba8875b4389d063dee59"
+      "sha256": "dbd6cbff4c6c3c56be681af28c592d941e6738f4e95c9932add829e3adcaaa6c"
     },
     {
       "name": "computer-use",
       "displayName": "antigravity computer use-mogu",
       "version": "1.0.2",
       "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.0.2/antigravity-computer-use-v1.0.2.zip",
-      "sha256": "aeedd279f6b37a7a92cb49911541843eac108ec0d6c03484009a0ecafa67a424"
+      "sha256": "a5ba66d195ca1e253279b7a772c5c3920f08d8f890c77aa8433e3e2bb7e60c4f"
     },
     {
       "name": "mnemon",
       "displayName": "antigravity长期记忆-mogu",
       "version": "1.0.2",
       "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.0.2/antigravity-mnemon-v1.0.2.zip",
-      "sha256": "1937e584c648ce9c8eb2493ebe5eba3801f9a10f1161b9aefffd2701ddf9decb"
+      "sha256": "39c40175680c3b35c6adf918af5bb41a524ba1794257dd66e0cb7a3e0138143e"
     },
     {
       "name": "antigravity-remote-mogu",
       "displayName": "antigravity远程-mogu",
       "version": "0.1.0",
       "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v0.1.0/antigravity-remote-mogu-v0.1.0.zip",
-      "sha256": "f5b81314897762159b351345aab7f999ff225f3a34d076cc1dc4c7b44ad29bee"
+      "sha256": "12e248f94c54e8d15164b761512564ae757281950960a51039eedbc386cd4f7d"
     }
   ]
 }

@@ -25,7 +25,7 @@
 | [![Computer Use](./assets/banners/computer-use.jpg)](./plugins/computer-use) | [![Mnemon](./assets/banners/mnemon.jpg)](./plugins/mnemon) |
 
 <p align="center">
-  <b>[远程控制 · Antigravity Remote (微信 / QQ / 飞书)](./plugins/remote)</b><br>
+  <a href="./plugins/remote"><b>远程控制 · Antigravity Remote (微信 / QQ / 飞书)</b></a><br>
   <a href="./plugins/remote"><img src="./assets/banners/antigravity-remote.jpg" width="100%" alt="Antigravity Remote" /></a>
 </p>
 
