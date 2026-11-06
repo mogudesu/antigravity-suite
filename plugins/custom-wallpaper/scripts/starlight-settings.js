@@ -7,7 +7,7 @@
   if (window.__agStarlightInstalled) return;
   window.__agStarlightInstalled = true;
 
-  const VERSION = "1.1.1";
+  const VERSION = "1.1.2";
   const SIDECAR = "http://127.0.0.1:" + (window.__AG_SIDECAR_PORT || 39290);
   const STYLE_ID = "ag-starlight-style";
   const WINDOW_ID = "ag-starlight-window";
@@ -289,7 +289,10 @@
         : await api("/api/update/status");
       state.update = data;
       if (data?.available && !silent) {
-        toast(L(`发现新版本 v${data.latest}，可在「更新」页升级`, `v${data.latest} is available in Update`));
+        const pending = (Array.isArray(data.components) ? data.components : []).filter((item) => item.available && item.installed !== false);
+        toast(pending.length
+          ? L(`发现 ${pending.length} 个插件可更新，可在「更新」页升级`, `${pending.length} plugin update(s) available in Update`)
+          : L(`发现新版本 v${data.latest}，可在「更新」页升级`, `v${data.latest} is available in Update`));
       }
     } catch (error) {
       state.update = { ok: false, error: error?.message || String(error) };
@@ -311,20 +314,48 @@
         headers: { "Content-Type": "application/json" },
         body: "{}",
       });
-      state.update = {
-        ...(state.update || {}),
-        ...data,
-        latest: data?.to || data?.latest || state.update?.latest || "",
-        current: data?.to || data?.current || state.update?.current || VERSION,
-        available: Boolean(data?.available),
-        configured: true,
-      };
+      const results = Array.isArray(data?.components) ? data.components : [];
+      const updatedResults = results.filter((item) => item.updated);
+      const failedResults = results.filter((item) => !item.updated);
       if (data?.updated) {
-        toast(L(`已更新到 v${data.to}，重启 Antigravity 生效`, `Updated to v${data.to}; restart Antigravity`));
-        setStatus(L("更新完成，重启 Antigravity 生效", "Update complete; restart Antigravity"), "ok");
+        const count = updatedResults.length || Number(data?.count) || 1;
+        const doneText = L(`已更新 ${count} 个插件，重启 Antigravity 生效`, `Updated ${count} plugin(s); restart Antigravity`);
+        toast(doneText);
+        setStatus(doneText, "ok");
+        if (failedResults.length) {
+          const failedText = L(
+            `部分插件失败：${failedResults.map((item) => item.displayName || item.name).join("、")}`,
+            `Some plugins failed: ${failedResults.map((item) => item.displayName || item.name).join(", ")}`,
+          );
+          toast(failedText);
+          setStatus(failedText, "warn");
+        }
+        const byName = new Map(updatedResults.map((item) => [item.name, item]));
+        const components = (state.update?.components || []).map((item) => {
+          const result = byName.get(item.name);
+          return result ? { ...item, installedVersion: result.to, available: false } : item;
+        });
+        state.update = {
+          ...(state.update || {}),
+          ...data,
+          latest: data?.latest || state.update?.latest || "",
+          current: data?.current || state.update?.current || VERSION,
+          components,
+          available: components.some((item) => item.available && item.installed !== false),
+          configured: true,
+        };
       } else {
-        toast(data?.message || L("已是最新版本", "Already up to date"));
-        setStatus(data?.message || L("已是最新版本", "Already up to date"), "ok");
+        const message = data?.message || L("已是最新版本", "Already up to date");
+        toast(message);
+        setStatus(message, data?.ok === false ? "warn" : "ok");
+        state.update = {
+          ...(state.update || {}),
+          ...data,
+          latest: data?.latest || state.update?.latest || "",
+          current: data?.current || state.update?.current || VERSION,
+          available: Boolean(data?.available),
+          configured: true,
+        };
       }
     } catch (error) {
       state.update = { ...(state.update || {}), ok: false, error: error?.message || String(error) };
@@ -336,9 +367,22 @@
     }
   }
 
+  function updateComponentRow(item) {
+    const name = esc(String(item.displayName || item.name || ""));
+    if (item.installed === false) {
+      return row(name, `<span class="ag-starlight-hint" style="margin:0">${L("未安装", "Not installed")}</span>`);
+    }
+    if (item.available) {
+      return row(name, `<strong>v${esc(String(item.installedVersion || "?"))} → v${esc(String(item.version || "?"))}</strong>`);
+    }
+    return row(name, `<span class="ag-starlight-hint" style="margin:0">v${esc(String(item.installedVersion || "?"))} ✓</span>`);
+  }
+
   function sectionUpdate() {
     const u = state.update || {};
     const latest = u.latest ? String(u.latest) : "";
+    const components = Array.isArray(u.components) ? u.components : [];
+    const pending = components.filter((item) => item.available && item.installed !== false);
     const statusText = state.updateLoading
       ? L("正在检查…", "Checking…")
       : u.error
@@ -346,19 +390,24 @@
         : u.configured === false
           ? L("未配置更新源，请先在 config/update.json 填写 GitHub 仓库", "Configure a GitHub repo in config/update.json")
           : u.latest
-            ? (u.available ? L(`发现新版本 v${latest}`, `v${latest} is available`) : L("已是最新版本", "Already up to date"))
+            ? (u.available
+              ? (pending.length
+                ? L(`发现 ${pending.length} 个插件可更新`, `${pending.length} plugin update(s) available`)
+                : L(`发现新版本 v${latest}`, `v${latest} is available`))
+              : L("全部已是最新版本", "Everything is up to date"))
             : L("尚未检查", "Not checked yet");
     return `<div class="ag-starlight-section">
       ${row(L("当前版本", "Current"), `<strong>v${esc(VERSION)}</strong>`)}
       ${row(L("最新版本", "Latest"), `<strong>${latest ? "v" + esc(latest) : "—"}</strong>`)}
+      ${components.length ? components.map(updateComponentRow).join("") : ""}
       ${row(L("更新源", "Update source"), `<span class="ag-starlight-hint" style="margin:0">${u.configured === false ? L("未配置", "Not configured") : L("GitHub Releases", "GitHub Releases")}</span>`)}
       ${row(L("状态", "Status"), `<span class="ag-starlight-hint" style="margin:0">${esc(statusText)}</span>`)}
       <div class="ag-starlight-actions">
         <button type="button" class="ag-starlight-btn" data-starlight-update-check ${state.updateLoading ? "disabled" : ""}>${L("检查更新", "Check for updates")}</button>
-        <button type="button" class="ag-starlight-btn primary" data-starlight-update-apply ${u.available && !state.updateLoading ? "" : "hidden"}>${L("立即更新", "Update now")}</button>
+        <button type="button" class="ag-starlight-btn primary" data-starlight-update-apply ${u.available && !state.updateLoading ? "" : "hidden"}>${L("全部更新", "Update all")}</button>
       </div>
       ${u.notes ? `<div class="ag-starlight-hint">${esc(String(u.notes).slice(0, 800))}</div>` : ""}
-      <div class="ag-starlight-hint">${L("更新包会校验 SHA-256，更新前自动备份；壁纸、提示词和本地配置会保留。更新完成后重启 Antigravity。", "The package is SHA-256 verified and backed up first. Wallpaper, prompts and local config are preserved. Restart Antigravity after updating.")}</div>
+      <div class="ag-starlight-hint">${L("四件套统一发版：逐个校验 SHA-256、备份后替换；壁纸、提示词、记忆、录制与本地配置都会保留。更新完成后重启 Antigravity。", "Suite updates are SHA-256 verified and backed up one by one; wallpaper, prompts, memories, recordings and local config are preserved. Restart Antigravity afterwards.")}</div>
     </div>`;
   }
 
@@ -778,7 +827,10 @@
     const available = Boolean(update.available);
     launcher.classList.toggle("has-update", available);
     if (available) {
-      launcher.title = L(`发现新版本 v${update.latest}，打开星夜美化更新`, `v${update.latest} available — open Starlight to update`);
+      const pending = (Array.isArray(update.components) ? update.components : []).filter((item) => item.available && item.installed !== false);
+      launcher.title = pending.length
+        ? L(`${pending.length} 个插件可更新，打开星夜美化更新`, `${pending.length} plugin update(s) — open Starlight`)
+        : L(`发现新版本 v${update.latest}，打开星夜美化更新`, `v${update.latest} available — open Starlight to update`);
       launcher.setAttribute("aria-label", launcher.title);
     } else {
       syncLauncherLanguage();

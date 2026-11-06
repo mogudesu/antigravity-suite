@@ -1389,6 +1389,43 @@ function generateThemeCss(dataUri, cfg) {
     }
 
     /* 设置 Skill 列表：两列卡片 */
+    .ag-skill-search {
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      margin: 6px 0 10px !important;
+      padding: 8px 12px !important;
+      border: 1px solid rgba(246, 216, 147, 0.14) !important;
+      border-radius: 10px !important;
+      background: linear-gradient(180deg, rgba(18, 21, 40, 0.72), rgba(10, 13, 26, 0.66)) !important;
+    }
+
+    .ag-skill-search svg {
+      width: 15px !important;
+      height: 15px !important;
+      flex: 0 0 15px !important;
+      color: #8FA3BA !important;
+    }
+
+    .ag-skill-search input {
+      flex: 1 !important;
+      min-width: 0 !important;
+      background: transparent !important;
+      border: 0 !important;
+      outline: 0 !important;
+      color: #DDE5F0 !important;
+      font-size: 12.5px !important;
+    }
+
+    .ag-skill-search input::placeholder { color: #7A879C !important; }
+
+    .ag-skill-search[data-empty="1"]::after {
+      content: '没有匹配的技能';
+      color: #8FA3BA !important;
+      font-size: 12px !important;
+      white-space: nowrap;
+    }
+
     .settings-modal-container .ag-skill-grid {
       display: grid !important;
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;

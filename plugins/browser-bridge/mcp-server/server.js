@@ -28,7 +28,7 @@ const {
 } = require("./recordings");
 
 const SERVER_NAME = "antigravity-browser-bridge";
-const SERVER_VERSION = "1.7.0";
+const SERVER_VERSION = "1.7.1";
 const ROOT = path.join(__dirname, "..");
 const STATUS_TIMEOUT_MS = 1500;
 const TAKEOVER_WAIT_MS = 1500;

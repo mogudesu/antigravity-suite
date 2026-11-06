@@ -4,5 +4,5 @@ Intentionally stdlib-only so the bundled Antigravity plugin runs on a machine
 that has nothing installed but a Python 3 interpreter.
 """
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __all__ = ["imaging", "policy", "protocol", "tools", "backends"]

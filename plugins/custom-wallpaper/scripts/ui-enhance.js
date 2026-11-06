@@ -2661,7 +2661,8 @@
     if (!dialog) return;
     const heading = [...dialog.querySelectorAll('h2, h3, h4')].find((node) => {
       const text = node.textContent.replace(/\s+/g, '').trim();
-      return text === 'Skills' || text === '系统核心技能' || text === '系统核心技能集' || text.startsWith('系统核心技能');
+      // 汉化后标题会变成「技能 79」，只认英文会让整段增强直接失效（只剩复制按钮）
+      return /^(Skills|技能)/.test(text) || text === '系统核心技能' || text === '系统核心技能集' || text.startsWith('系统核心技能');
     });
     if (!heading) return;
     const section = heading.closest('.space-y-2') || heading.parentElement?.parentElement?.parentElement;
@@ -2671,6 +2672,23 @@
     if (!container) return;
 
     container.classList.add('ag-skill-grid');
+    if (!section.querySelector('.ag-skill-search')) {
+      const box = document.createElement('div');
+      box.className = 'ag-skill-search';
+      box.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor"><path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/></svg><input type="text" placeholder="搜索技能（名称或描述）" aria-label="搜索技能" />';
+      container.parentElement.insertBefore(box, container);
+      const input = box.querySelector('input');
+      input.addEventListener('input', () => {
+        const q = input.value.trim().toLowerCase();
+        let shown = 0;
+        container.querySelectorAll('.ag-skill-card').forEach((card) => {
+          const hit = !q || (card.innerText || '').toLowerCase().includes(q);
+          card.style.display = hit ? '' : 'none';
+          if (hit) shown += 1;
+        });
+        box.dataset.empty = shown ? '' : '1';
+      });
+    }
     collectSkillPathsFromReact(container.querySelector('.ag-skill-card') || container.querySelector(':scope > .group'));
     container.querySelectorAll(':scope > .group').forEach((row) => {
       row.classList.add('ag-skill-card');

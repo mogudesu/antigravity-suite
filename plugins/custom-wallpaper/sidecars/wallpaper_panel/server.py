@@ -1301,7 +1301,7 @@ class WallpaperHandler(BaseHTTPRequestHandler):
 
         if path == "/api/update/apply":
             try:
-                data = update_command(["apply"], timeout=180)
+                data = update_command(["apply"], timeout=300)
             except Exception as error:
                 self._json(500, {"ok": False, "error": str(error)})
                 return

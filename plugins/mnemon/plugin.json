@@ -2,7 +2,7 @@
   "$schema": "https://antigravity.google/schemas/v1/plugin.json",
   "name": "mnemon",
   "displayName": "antigravity长期记忆-mogu",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Permanent persona and memory for Antigravity: a first-class PERSONA.md volume, resident USER.md/MEMORY.md, searchable memory spaces with pinned facts, project documents, atomic writes, dual-drive mirroring, verified daily gzip snapshots and startup self-healing.",
   "logo": "assets/logo.png",
   "suggestedPrompts": [
