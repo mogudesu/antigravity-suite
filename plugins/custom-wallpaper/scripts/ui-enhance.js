@@ -2111,11 +2111,14 @@
         !/^\d{4}年\d{1,2}月\d{1,2}日(\s+\d{1,2}:\d{2})?$/.test(line) &&
         !/^\d{1,2}月\d{1,2}日(\s+\d{1,2}:\d{2})?$/.test(line) &&
         !/^\d{1,2}:\d{2}$/.test(line) &&
-        !/^(今天|昨天|前天)$/.test(line));
+        !/^(今天|昨天|前天)$/.test(line) &&
+        !/^\d+\s*[smhd]\s*ago$/i.test(line) &&
+        !/^刚刚$/.test(line));
     return kept.join('\n')
       .replace(/\s+\d{4}年\d{1,2}月\d{1,2}日(\s+\d{1,2}:\d{2})?\s*$/, '')
       .replace(/\s+\d{1,2}月\d{1,2}日(\s+\d{1,2}:\d{2})?\s*$/, '')
       .replace(/\s+\d{1,2}:\d{2}\s*$/, '')
+      .replace(/\s+\d+\s*[smhd]\s*ago\s*$/i, '')
       .trim();
   }
 
@@ -2139,6 +2142,50 @@
     return source?.closest?.('[data-turn-content]') || null;
   }
 
+  function menuItemByText(pattern) {
+    return Array.from(document.querySelectorAll('[role="menuitem"], [role="menu"] button'))
+      .find((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 4 || rect.height < 4) return false;
+        if (el.getAttribute('aria-disabled') === 'true' || el.disabled) return false;
+        return pattern.test((el.innerText || '').replace(/\s+/g, ' ').trim());
+      }) || null;
+  }
+
+  /**
+   * 走应用原生的「Undo to Here」：撤回这一轮（提问 + 回复）。
+   * 菜单是消息的右键菜单，弹出后再点确认框里的撤销按钮。
+   */
+  async function undoLastTurn(article) {
+    if (!article) return false;
+    const rect = article.getBoundingClientRect();
+    const x = Math.round(rect.left + Math.min(140, Math.max(24, rect.width / 2)));
+    const y = Math.round(Math.min(Math.max(rect.top + 40, 120), window.innerHeight - 140));
+    article.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y,
+    }));
+
+    let item = null;
+    for (let attempt = 0; attempt < 12 && !item; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      item = menuItemByText(/undo to here|撤销到此处/i);
+    }
+    if (!item) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+      return false;
+    }
+    item.click();
+
+    let confirm = null;
+    for (let attempt = 0; attempt < 20 && !confirm; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      confirm = Array.from(document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button'))
+        .find((button) => !button.disabled && /^(undo|确认撤销|确认|撤销)$/i.test((button.innerText || '').trim()));
+    }
+    confirm?.click();
+    return true;
+  }
+
   async function retryMessage(source) {
     const turnRoot = turnRootFor(source);
     const step = turnRoot?.querySelector('[data-testid="user-input-step"]');
@@ -2146,15 +2193,31 @@
     if (!text) {
       const article = source?.closest?.('[role="article"]') || (source?.matches?.('[role="article"]') ? source : null);
       const user = article ? previousUserArticle(article) : null;
+      // 只认 user-input-step：退回整段 article 文本会把「2d ago」这类操作栏文字也带进来
       const userStep = user?.querySelector('[data-testid="user-input-step"]');
-      text = cleanPromptText(userStep?.innerText || articleText(user) || '');
+      text = cleanPromptText(userStep?.innerText || '');
     }
     if (!text) {
       showToast('没找到这条回复对应的提问');
       return;
     }
+
+    // 先撤回这一轮，再重新提问；撤不掉就只填入、不发送，避免重复提问
+    const agentArticle = turnRoot?.querySelector('[role="article"][aria-label="Agent response"]')
+      || (source?.closest?.('[role="article"]') || null);
+    const undone = await undoLastTurn(agentArticle);
+    if (!undone) {
+      if (!replaceComposerText(text)) {
+        showToast('输入框未就绪，稍后再试');
+        return;
+      }
+      showToast('没找到撤回入口，已只填入未发送（避免重复提问）');
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
     if (!replaceComposerText(text)) {
-      showToast('输入框未就绪，稍后再试');
+      showToast('已撤回，但输入框未就绪，请手动输入');
       return;
     }
     let send = null;
@@ -2164,11 +2227,11 @@
       if (send && !send.disabled) break;
     }
     if (!send || send.disabled) {
-      showToast('提问已填入，请手动发送');
+      showToast('已撤回并填入，请手动发送');
       return;
     }
     send.click();
-    showToast('已重新发送这条提问');
+    showToast('已撤回并重新发送');
   }
 
   function ensureConversationActions() {
@@ -2339,13 +2402,19 @@
     }
     if (menu.querySelector('.ag-conversation-download')) return;
     const items = [...menu.querySelectorAll('[role="menuitem"]')];
-    const template = items.find((item) => /^(Copy|复制)/.test(item.innerText.trim())) || items[0];
+    // 用普通菜单项做模板：「复制」是带箭头和 space-between 的二级菜单触发器，
+    // 拿它当模板会把新项挤成居中/缩进错位。
+    const isPlainItem = (item) => !/space-between/.test(String(item.className)) &&
+      !/Alt\+|Ctrl\+/.test(item.innerText || '');
+    const template = items.find((item) => isPlainItem(item) && /^(Rename|Pin|重命名|置顶|Mark Unread)/.test(item.innerText.trim()))
+      || items.find(isPlainItem)
+      || items[0];
     if (!template) return;
     const item = template.cloneNode(false);
     item.classList.add('ag-conversation-download');
     item.setAttribute('role', 'menuitem');
     item.setAttribute('tabindex', '0');
-    item.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"></path></svg><span>下载为 Markdown</span>';
+    item.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 -960 960 960" fill="currentColor" class="text-secondary-foreground shrink-0"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"></path></svg><span>下载为 Markdown</span>';
     item.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -2374,11 +2443,11 @@
       }
       downloadConversation(null);
     });
-    if (template.innerText.trim().startsWith('Copy') || template.innerText.trim().startsWith('复制')) {
-      template.after(item);
-    } else {
-      menu.appendChild(item);
-    }
+    const copyItem = items.find((el) => /^(Copy|复制)/.test((el.innerText || '').trim()));
+    if (copyItem) copyItem.after(item);
+    else template.after(item);
+    // 注入的同时就把菜单翻译掉：单靠兜底扫描会晚半秒，看起来像"没变化"
+    translateMenuLabels(menu);
   }
 
   function ensureConversationDownloadButton() {
@@ -2426,6 +2495,54 @@
       }
       downloadConversation(null);
     }, true);
+  }
+
+  // 菜单是后渲染的浮层，只在点击后 400ms 内抓一次会漏（用户看到过英文/缺项的实例）。
+  // 这里在每次扫描时兜底：任何可见菜单都补翻译 + 补菜单项。
+  const AG_MENU_LABELS = {
+    'Rename': '重命名',
+    'Pin': '置顶',
+    'Unpin': '取消置顶',
+    'Mark Unread': '标为未读',
+    'Mark Read': '标为已读',
+    'Copy': '复制',
+    'Split': '拆分',
+    'Archive': '归档',
+    'Delete': '删除',
+    'Copy Project Name': '复制项目名称',
+    'Project Settings': '项目设置',
+    'Show in File Explorer': '在资源管理器中显示',
+    'Delete Project': '删除项目',
+  };
+
+  function translateMenuLabels(menu) {
+    menu.querySelectorAll('[role="menuitem"]').forEach((item) => {
+      item.childNodes.forEach((node) => {
+        if (node.nodeType !== 3) return;
+        const raw = node.textContent.trim();
+        const hit = AG_MENU_LABELS[raw];
+        if (hit) node.textContent = node.textContent.replace(raw, hit);
+      });
+    });
+  }
+
+  let agMenuSweepAt = 0;
+  function ensureMenuSweep() {
+    const now = performance.now();
+    if (now - agMenuSweepAt < 120) return;
+    const menus = Array.from(document.querySelectorAll('[role="menu"]')).filter((menu) => {
+      const rect = menu.getBoundingClientRect();
+      return rect.width > 80 && rect.height > 30;
+    });
+    if (!menus.length) return;
+    agMenuSweepAt = now;
+    menus.forEach((menu) => {
+      translateMenuLabels(menu);
+      const looksLikeConversation = /Rename|Pin|Copy|Split|重命名|置顶|复制|拆分/.test(menu.innerText || '');
+      if (looksLikeConversation && !menu.querySelector('.ag-conversation-download')) {
+        attachConversationDownloadItem(0);
+      }
+    });
   }
 
   function ensureConversationDownloadMenu() {
@@ -2897,16 +3014,27 @@
 
     // Geometry reads force a full relayout of Antigravity's deep document (~45ms each), so the rail
     // re-measures only when something could have moved it; a 2.5s safety net catches manual pane drags.
+    // 右侧面板展开/收起是逐帧动画：ResizeObserver 会在每一帧后触发，强制刷新一次几何，轨道才跟手。
     const now = performance.now();
     const sinceGeom = node.dataset.geomAt ? now - Number(node.dataset.geomAt) : Infinity;
     const sizeKey = window.innerWidth + 'x' + window.innerHeight + ':' + turns.length;
-    if (sinceGeom > 500 && (node.dataset.sizeKey !== sizeKey || sinceGeom > 2500)) {
+    const forceGeom = node.dataset.geomForce === '1';
+    if (forceGeom) node.dataset.geomForce = '';
+    if (forceGeom || (sinceGeom > 500 && (node.dataset.sizeKey !== sizeKey || sinceGeom > 2500))) {
       const rect = viewport.getBoundingClientRect();
       const contentRect = content ? content.getBoundingClientRect() : null;
       const measured = Math.max(140, rect.height - 24);
+      // 优先不压住消息内容：复制/点赞那排图标比内容容器还宽出一截，
+      // 所以直接量一下操作行的右边缘，按真实边界让位；内容窄时仍贴视口右缘。
+      let contentRight = contentRect ? contentRect.right : 0;
+      if (contentRect) {
+        const actions = document.querySelector('[role="article"] [aria-label="Bad response"]')?.parentElement;
+        const actionsRect = actions ? actions.getBoundingClientRect() : null;
+        if (actionsRect && actionsRect.width > 0) contentRight = Math.max(contentRight, actionsRect.right);
+      }
       const left = contentRect
-        ? Math.round(Math.min(rect.right - 34, contentRect.right + 10))
-        : Math.round(rect.right - 30);
+        ? Math.round(Math.min(rect.right - 22, Math.max(rect.right - 26, contentRight + 9)))
+        : Math.round(rect.right - 22);
       node.dataset.geomAt = String(Math.round(now));
       node.dataset.sizeKey = sizeKey;
       node.dataset.trackHeight = String(Math.round(measured));
@@ -2915,6 +3043,21 @@
       node.style.left = left + 'px';
       node.style.top = Math.round(rect.top + 12) + 'px';
       node.style.height = measured + 'px';
+    }
+    if (!viewport.__agMinimapResizeBound && typeof ResizeObserver === 'function') {
+      viewport.__agMinimapResizeBound = true;
+      // ResizeObserver 回调发生在布局之后，直接重算即可；
+      // 不要再包 requestAnimationFrame —— 窗口不产帧时 rAF 是冻结的，轨道会一直不跟。
+      const reflow = () => {
+        const live = document.getElementById('ag-chat-minimap');
+        if (!live) return;
+        live.dataset.geomForce = '1';
+        ensureChatMinimap();
+      };
+      const observer = new ResizeObserver(reflow);
+      observer.observe(viewport);
+      if (content) observer.observe(content);
+      viewport.__agMinimapResizeObserver = observer;
     }
     node.classList.add('is-visible');
 
@@ -3810,6 +3953,7 @@
     ensureCustomizationsPage();
     ensureConversationDownloadMenu();
     ensureConversationDownloadButton();
+    ensureMenuSweep();
     enhanceSkillCards();
     installSectionTransitions();
     installProjectTransitions();

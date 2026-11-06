@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     一键将本地运行中的 Antigravity 插件变更同步到本仓库，并自动提交推送到 GitHub。
 .EXAMPLE

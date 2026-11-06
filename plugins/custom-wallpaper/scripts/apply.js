@@ -2660,25 +2660,31 @@ function generateThemeCss(dataUri, cfg) {
       color: #8FA3BA !important;
     }
 
-    [role="menu"].surface-glass {
-      background: #0D1020 !important;
-      border: 1px solid rgba(165, 180, 252, 0.16) !important;
-      border-radius: 9px !important;
+    [role="menu"].surface-glass,
+    [role="menu"].agy-overlay {
+      background:
+        radial-gradient(120% 160% at 12% 0%, rgba(165, 180, 252, 0.08) 0%, transparent 58%),
+        linear-gradient(180deg, rgba(18, 21, 40, 0.97) 0%, rgba(10, 13, 26, 0.96) 100%) !important;
+      border: 1px solid rgba(246, 216, 147, 0.16) !important;
+      border-radius: 12px !important;
       box-shadow:
-        0 16px 38px rgba(0, 0, 0, 0.50),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-      padding: 4px !important;
+        0 20px 56px rgba(0, 0, 0, 0.58),
+        0 0 30px -18px rgba(246, 216, 147, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+      padding: 5px !important;
     }
 
-    [role="menu"].surface-glass [role="menuitem"] {
-      border-radius: 6px !important;
+    [role="menu"].surface-glass [role="menuitem"],
+    [role="menu"].agy-overlay [role="menuitem"] {
+      border-radius: 8px !important;
       color: #C5D2E2 !important;
       transition: background-color 120ms ease, color 120ms ease !important;
     }
 
-    [role="menu"].surface-glass [role="menuitem"]:hover {
-      background: rgba(165, 180, 252, 0.10) !important;
-      color: #F1F5F9 !important;
+    [role="menu"].surface-glass [role="menuitem"]:hover,
+    [role="menu"].agy-overlay [role="menuitem"]:hover {
+      background: rgba(246, 216, 147, 0.10) !important;
+      color: #F6E7C1 !important;
     }
 
     .ag-conversation-download {
