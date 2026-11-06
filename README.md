@@ -16,6 +16,16 @@
 
 ---
 
+## 🎨 插件封面一览 (Showcase Covers)
+
+| [星夜美化 · Custom Wallpaper](./plugins/custom-wallpaper) | [浏览器控制 · Browser Bridge](./plugins/browser-bridge) |
+| :---: | :---: |
+| [![Custom Wallpaper](./assets/banners/custom-wallpaper.jpg)](./plugins/custom-wallpaper) | [![Browser Bridge](./assets/banners/browser-bridge.jpg)](./plugins/browser-bridge) |
+| **[电脑控制 · Computer Use](./plugins/computer-use)** | **[长期记忆 · Mnemon](./plugins/mnemon)** |
+| [![Computer Use](./assets/banners/computer-use.jpg)](./plugins/computer-use) | [![Mnemon](./assets/banners/mnemon.jpg)](./plugins/mnemon) |
+
+---
+
 ## 📦 功能介绍
 
 | 插件 | 看板娘图标 | 功能说明 | 核心技术 | 开源协议 |

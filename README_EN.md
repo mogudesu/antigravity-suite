@@ -16,6 +16,16 @@ Each plugin comes equipped with an exclusive 3D mascot avatar icon (transparent 
 
 ---
 
+## 🎨 Official Showcase Covers
+
+| [Custom Wallpaper](./plugins/custom-wallpaper) | [Browser Bridge](./plugins/browser-bridge) |
+| :---: | :---: |
+| [![Custom Wallpaper](./assets/banners/custom-wallpaper.jpg)](./plugins/custom-wallpaper) | [![Browser Bridge](./assets/banners/browser-bridge.jpg)](./plugins/browser-bridge) |
+| **[Computer Use](./plugins/computer-use)** | **[Mnemon](./plugins/mnemon)** |
+| [![Computer Use](./assets/banners/computer-use.jpg)](./plugins/computer-use) | [![Mnemon](./assets/banners/mnemon.jpg)](./plugins/mnemon) |
+
+---
+
 ## 📦 Features & Capabilities
 
 | Plugin | Mascot Icon | Feature Description | Core Tech Stack | License |
