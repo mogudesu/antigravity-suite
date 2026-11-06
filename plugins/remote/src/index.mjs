@@ -10,6 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { UPDATE_PAGE_URL, resolveInstalledDir } from './update/updater.mjs';
 
 import { paths, ensureRuntimeDirs, PLUGIN_ROOT } from './store/paths.mjs';
 import { SecretStore, redact } from './store/secret-store.mjs';
@@ -55,46 +58,46 @@ const APP_VERSION = (() => {
     return '0.0.0';
   }
 })();
-const UPDATE_REPO = 'mogudesu/antigravity-suite';
-let updateInfo = { current: APP_VERSION, latest: '', url: '', hasUpdate: false, checkedAt: 0, error: '' };
+const UPDATE_CLI = path.join(HERE, 'update', 'cli.mjs');
+const execFileAsync = promisify(execFile);
+let updateInfo = { ok: true, current: APP_VERSION, latest: '', url: UPDATE_PAGE_URL, hasUpdate: false, checkedAt: 0, error: '' };
+let updateApplying = false;
 
-function compareVersion(a, b) {
-  const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
+async function runUpdateCli(command, timeout) {
+  // 放到子进程里跑：只会给这个子进程加系统代理，不影响 IM 渠道自身的直连
+  const { stdout } = await execFileAsync(process.execPath, [UPDATE_CLI, command], {
+    cwd: PLUGIN_ROOT,
+    timeout,
+    maxBuffer: 4 * 1024 * 1024,
+    windowsHide: true,
+    env: { ...process.env },
+  });
+  const line = String(stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '{}';
+  return JSON.parse(line);
 }
 
 async function checkForUpdate() {
   try {
-    // 不用 GitHub API：未认证每小时只有 60 次，共享 IP 很容易被限流。
-    // /releases/latest 的 302 跳转里直接带 tag，且没有配额限制。
-    const res = await fetch(`https://github.com/${UPDATE_REPO}/releases/latest`, {
-      redirect: 'manual',
-      headers: { 'user-agent': 'antigravity-remote-mogu' },
-      signal: AbortSignal.timeout(8000),
-    });
-    const location = res.headers.get('location') || '';
-    const tag = (location.match(/\/releases\/tag\/([^/?#]+)/) || [])[1] || '';
-    const latest = decodeURIComponent(tag).replace(/^v/i, '');
-    if (!latest) throw new Error(`HTTP ${res.status}`);
-    updateInfo = {
-      current: APP_VERSION,
-      latest,
-      url: `https://github.com/${UPDATE_REPO}/releases/latest`,
-      hasUpdate: Boolean(latest) && compareVersion(latest, APP_VERSION) > 0,
-      checkedAt: Date.now(),
-      error: '',
-    };
-    if (updateInfo.hasUpdate) logger.info(`发现新版本 v${latest}（当前 v${APP_VERSION}）`);
+    const info = await runUpdateCli('check', 30000);
+    updateInfo = { ...updateInfo, ...info, url: UPDATE_PAGE_URL };
+    if (updateInfo.hasUpdate) logger.info(`发现远程插件新版本 v${updateInfo.latest}（当前 v${updateInfo.current}）`);
   } catch (error) {
-    updateInfo = { ...updateInfo, checkedAt: Date.now(), error: error?.message || String(error) };
+    updateInfo = { ...updateInfo, ok: false, checkedAt: Date.now(), error: error?.message || String(error) };
     logger.debug?.('检查更新失败：', updateInfo.error);
   }
   return updateInfo;
+}
+
+function scheduleHubRestart(installedDir) {
+  const helper = path.join(installedDir, 'src', 'update', 'restart-hub.mjs');
+  const logFile = path.join(dirs.logs, 'hub.log');
+  const child = spawn(process.execPath, [helper, installedDir, String(PORT), logFile], {
+    detached: true,
+    stdio: 'ignore',
+    cwd: installedDir,
+    env: { ...process.env, AG_REMOTE_PORT: String(PORT) },
+  });
+  child.unref();
 }
 
 const logger = {
@@ -636,6 +639,33 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/update') {
       return json(res, 200, { ok: true, ...updateInfo });
+    }
+
+    if (pathname === '/api/update/apply' && req.method === 'POST') {
+      if (updateApplying) return json(res, 409, { ok: false, updated: false, error: '更新正在进行' });
+      updateApplying = true;
+      let result;
+      try {
+        result = await runUpdateCli('apply', 300000);
+      } catch (error) {
+        updateApplying = false;
+        return json(res, 500, { ok: false, updated: false, error: error?.message || String(error) });
+      }
+      updateApplying = false;
+      if (result?.latest) updateInfo = { ...updateInfo, latest: result.latest, checkedAt: Date.now(), hasUpdate: Boolean(result.hasUpdate) };
+      json(res, 200, result);
+      if (result?.updated) {
+        const installedDir = resolveInstalledDir();
+        setTimeout(() => {
+          try {
+            scheduleHubRestart(installedDir);
+          } catch (error) {
+            logger.error('重启远程服务失败：', error?.message || error);
+          }
+          shutdown();
+        }, 600);
+      }
+      return;
     }
 
     if (pathname === '/api/health') {

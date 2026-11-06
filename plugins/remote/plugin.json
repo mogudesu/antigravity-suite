@@ -1,7 +1,7 @@
 {
   "name": "antigravity-remote-mogu",
   "displayName": "antigravity远程-mogu",
-  "version": "1.1.2",
+  "version": "0.1.0",
   "description": "把微信 / QQ / 飞书接入 Antigravity：面板扫码绑定机器人，手机发消息驱动桌面会话，思考与工具过程实时流式回推，产出文件直接发回聊天，桌面与手机双向同步。",
   "logo": "assets/logo.png",
   "keywords": [

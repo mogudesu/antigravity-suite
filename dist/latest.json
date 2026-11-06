@@ -1,0 +1,43 @@
+{
+  "name": "antigravity-suite",
+  "version": "1.1.2",
+  "publishedAt": "2026-11-06T16:42:51.448Z",
+  "notes": "Antigravity Suite: 包含最新版 antigravity-remote-mogu 热更新模块及全部五大插件",
+  "components": [
+    {
+      "name": "antigravity-custom-wallpaper",
+      "displayName": "Antigravity 星夜美化-mogu",
+      "version": "1.1.2",
+      "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.1.2/antigravity-custom-wallpaper-v1.1.2.zip",
+      "sha256": "2295b2be3dccd7664e8a3c30a8365c321500409a93af7995371be3264fed264e"
+    },
+    {
+      "name": "antigravity-browser-bridge",
+      "displayName": "antigravity浏览器控制与录制回放（Edge / Chrome）",
+      "version": "1.7.1",
+      "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.7.1/antigravity-browser-bridge-v1.7.1.zip",
+      "sha256": "5278bd02bd094d29022b78716da9f453426c23378443ba8875b4389d063dee59"
+    },
+    {
+      "name": "computer-use",
+      "displayName": "antigravity computer use-mogu",
+      "version": "1.0.2",
+      "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.0.2/antigravity-computer-use-v1.0.2.zip",
+      "sha256": "aeedd279f6b37a7a92cb49911541843eac108ec0d6c03484009a0ecafa67a424"
+    },
+    {
+      "name": "mnemon",
+      "displayName": "antigravity长期记忆-mogu",
+      "version": "1.0.2",
+      "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v1.0.2/antigravity-mnemon-v1.0.2.zip",
+      "sha256": "1937e584c648ce9c8eb2493ebe5eba3801f9a10f1161b9aefffd2701ddf9decb"
+    },
+    {
+      "name": "antigravity-remote-mogu",
+      "displayName": "antigravity远程-mogu",
+      "version": "0.1.0",
+      "zipUrl": "https://github.com/mogudesu/antigravity-suite/releases/download/v0.1.0/antigravity-remote-mogu-v0.1.0.zip",
+      "sha256": "f5b81314897762159b351345aab7f999ff225f3a34d076cc1dc4c7b44ad29bee"
+    }
+  ]
+}

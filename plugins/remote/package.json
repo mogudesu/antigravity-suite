@@ -1,6 +1,6 @@
 {
   "name": "antigravity-remote-mogu",
-  "version": "1.1.2",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "antigravity远程-mogu：把微信 / QQ / 飞书接入 Antigravity（扫码绑定、流式过程卡、双向同步、文件直传）",
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node --test tests/",
+    "test": "node --test \"tests/*.test.mjs\"",
     "sync": "node scripts/sync-plugin.mjs",
     "install-plugin": "node scripts/install-plugin.mjs"
   },

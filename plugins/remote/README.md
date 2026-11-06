@@ -53,6 +53,19 @@ cd ~/.gemini/config/plugins/antigravity-remote-mogu && npm install --omit=dev
 开发时想「改仓库即生效」：`node scripts/sync-plugin.mjs --link`（Windows 目录联接）。
 ⚠️ Antigravity 的插件列表只扫描真实目录，目录联接会被跳过；要让插件出现在「自定义配置 → 已安装」，请用默认复制模式，并在改动后重新同步。
 
+### 自动更新
+
+远程插件作为套装第五个组件（版本从 `0.1.0` 起），检查 `mogudesu/antigravity-suite` 最新 Release 的
+`latest.json` 里 `antigravity-remote-mogu` 组件：
+
+- 面板顶部出现「新版本 → 立即更新」；下载 zip、校验 SHA-256、备份到
+  `~/.gemini/memory/antigravity-remote-backups/`，替换插件文件后由 detached helper 重启 hub。
+- 用户数据（`~/.gemini/memory/antigravity-remote` 下的 secrets/state/日记）不受影响。
+- MCP 工具不会热替换，更新后重启 Antigravity 才会刷新。
+- 星夜美化插件的「更新」页也会列出远程插件；它对远程组件只负责触发，实际下载/替换/重启交给远程 hub。
+
+发版时四个 UI 插件和远程插件一起打包；改源码后先 `node scripts/install-plugin.mjs`（复制模式）同步到插件目录。
+
 **开机自启（强烈建议）**：
 
 ```bash

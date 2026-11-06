@@ -76,6 +76,7 @@
 <div id="updateBar" class="update-bar" hidden>
   <span>有新版本 <b id="updateVersion"></b> 可用（当前 v<span id="updateCurrent"></span>）</span>
   <span class="sp">
+    <button class="primary" id="updateApply">立即更新</button>
     <button id="updateCopy">复制下载地址</button>
     <a id="updateLink" href="#" target="_blank" rel="noreferrer">前往下载</a>
     <button id="updateDismiss" aria-label="本次不再提示">×</button>
@@ -994,6 +995,29 @@ async function refreshUpdate() {
       localStorage.setItem('agUpdateDismissed', String(info.latest));
       bar.hidden = true;
     };
+    const applyBtn = document.getElementById('updateApply');
+    applyBtn.disabled = false;
+    applyBtn.textContent = '立即更新';
+    applyBtn.onclick = async () => {
+      applyBtn.disabled = true;
+      applyBtn.textContent = '更新中…';
+      try {
+        const result = await api('/api/update/apply', { method: 'POST', body: {} });
+        if (result.updated) {
+          toast(`已更新到 v${result.to}，远程服务重启中；MCP 工具需重启 Antigravity 后刷新`);
+          bar.hidden = true;
+          setTimeout(() => location.reload(), 9000);
+        } else {
+          toast(result.message || '已是最新版本');
+          applyBtn.disabled = false;
+          applyBtn.textContent = '立即更新';
+        }
+      } catch (error) {
+        toast('更新失败：' + (error?.message || error), true);
+        applyBtn.disabled = false;
+        applyBtn.textContent = '立即更新';
+      }
+    };
     bar.hidden = false;
   } catch {
     // 没有网络或 GitHub 不可达时静默，不打扰使用
@@ -1002,8 +1026,9 @@ async function refreshUpdate() {
 
 refresh();
 refreshUpdate();
+setTimeout(refreshUpdate, 8000);
 setInterval(refresh, 15000);
-setInterval(refreshUpdate, 6 * 3600 * 1000);
+setInterval(refreshUpdate, 30 * 60 * 1000);
 </script>
 </body>
 </html>
