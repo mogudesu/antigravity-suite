@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    一键将本仓库的 4 大插件安装/部署到本机 Antigravity 配置目录。
+    一键将本仓库的 5 大插件安装/部署到本机 Antigravity 配置目录。
 .EXAMPLE
     .\install.ps1
 #>
@@ -19,7 +19,8 @@ $Mapping = @(
     @{ Dest = "Antigravity 星夜美化-mogu"; Src = "custom-wallpaper" },
     @{ Dest = "antigravity-browser-bridge"; Src = "browser-bridge" },
     @{ Dest = "antigravity computer use-mogu"; Src = "computer-use" },
-    @{ Dest = "antigravity长期记忆-mogu"; Src = "mnemon" }
+    @{ Dest = "antigravity长期记忆-mogu"; Src = "mnemon" },
+    @{ Dest = "antigravity-remote-mogu"; Src = "remote" }
 )
 
 Write-Host ">>> 正在安装 Antigravity 全家桶插件到本地..." -ForegroundColor Cyan

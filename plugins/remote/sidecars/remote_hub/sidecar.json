@@ -1,0 +1,20 @@
+{
+  "command": "C:\\Program Files\\nodejs\\node.exe",
+  "args": [
+    "server.mjs"
+  ],
+  "description": "antigravity远程-mogu 守护进程：微信 / QQ / 飞书 机器人与 Antigravity 会话桥接",
+  "display_name": "antigravity远程-mogu",
+  "has_web_ui": true,
+  "restart_policy": "always",
+  "ui_config": {
+    "display_name": "antigravity远程-mogu · 控制台",
+    "views": [
+      {
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "path": "/ui/panel.html",
+        "title": "antigravity远程-mogu"
+      }
+    ]
+  }
+}

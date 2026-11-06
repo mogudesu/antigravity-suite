@@ -6,13 +6,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Google%20Antigravity-orange.svg)](https://antigravity.google)
-[![Architecture](https://img.shields.io/badge/Architecture-MCP%20%7C%20Win32%20%7C%20MV3-purple.svg)]()
+[![Architecture](https://img.shields.io/badge/Architecture-MCP%20%7C%20Win32%20%7C%20MV3%20%7C%20IM%20Bridge-purple.svg)]()
 
 > 💡 **声明**：本文由 Gemini 3.8 Flash 生成，插件由 DeepSeek V4.1 Flash 制作。
 
-专为 **Google Antigravity** 量身打造的四大增强插件全家桶：**视觉美化与交互强化**、**浏览器深度接管**、**Win32 桌面控制** 与 **永久分层记忆**。
+专为 **Google Antigravity** 量身打造的五大增强插件全家桶：**视觉美化与交互强化**、**浏览器深度接管**、**Win32 桌面控制**、**永久分层记忆** 与 **多端移动遥控 (微信/QQ/飞书)**。
 
-四大插件均配备专属 3D 看板娘图标，开箱即用，全面赋能个人开发者与自主 AI Agent 协作。
+五大插件均配备专属 3D 看板娘图标，开箱即用，全面赋能个人开发者与自主 AI Agent 协作。
 
 ---
 
@@ -24,16 +24,22 @@
 | **[电脑控制 · Computer Use](./plugins/computer-use)** | **[长期记忆 · Mnemon](./plugins/mnemon)** |
 | [![Computer Use](./assets/banners/computer-use.jpg)](./plugins/computer-use) | [![Mnemon](./assets/banners/mnemon.jpg)](./plugins/mnemon) |
 
+<p align="center">
+  <b>[远程控制 · Antigravity Remote (微信 / QQ / 飞书)](./plugins/remote)</b><br>
+  <a href="./plugins/remote"><img src="./assets/banners/antigravity-remote.jpg" width="100%" alt="Antigravity Remote" /></a>
+</p>
+
 ---
 
 ## 📦 功能介绍
 
 | 插件 | 看板娘图标 | 功能说明 | 核心技术 | 开源协议 |
 | :--- | :---: | :--- | :--- | :---: |
-| **[星夜美化](./plugins/custom-wallpaper)**<br>`custom-wallpaper` | <img src="./plugins/custom-wallpaper/assets/logo.png" width="96" height="96" alt="星夜美化" /> | **全景视觉与工作台交互深度强化**<br>• **视觉与插件卡片美化**：一键注入任意高清壁纸与半透明磨砂毛玻璃效果；插件与技能界面卡片样式全新重构美化，并增加一键打开本地文件夹路径的功能。<br>• **对话框全能强化**：输入框支持插件快捷调用选项、常用提示词预设快捷选择、思考强度（Thinking Budget）滑块调节选项。<br>• **对话栏与右侧会话极速跳转**：右侧对话列表支持快速点击秒级跳转对话、对话进度条强化、支持一键下载导出完整对话、支持标记独立未读对话。<br>• **文件交互与开发辅助**：对话中的文件支持右键直接打开文件或直接定位所在文件夹路径。<br>• **系统级遥测与汉化**：底部常驻 Token 额度监控、上下文窗口遥测小窗与未读对话雷达；760+ 词条无损一秒中英双向瞬切汉化引擎。 | CSS Variables / DOM Observer / Canvas / Python 测试套件 | [MIT](plugins/custom-wallpaper/LICENSE) |
-| **[浏览器控制](./plugins/browser-bridge)**<br>`browser-bridge` | <img src="./plugins/browser-bridge/assets/logo.png" width="96" height="96" alt="浏览器控制" /> | **日常浏览器深度直连与 RPA 录制回放**<br>• 直连日常使用的已登录 Edge / Chrome，保留原有的全部 Cookie、账号状态与扩展插件。<br>• 赋能 AI 自主执行网页调研、资料搜集、自动点击与复杂表单填写。<br>• **演示即生成 Skill**：在网页上操作一遍，即可自动提取可变参数并沉淀为专属 AI 技能，支持后续一键自动化快放。<br>• 悬浮录制胶囊支持划词备注与元素提取，具备视觉自愈与多窗口防冲突中继。 | MCP 协议 / Chrome MV3 扩展 / CDP 桥接 / 自动化回放 | [MIT](plugins/browser-bridge/LICENSE) |
+| **[星夜美化](./plugins/custom-wallpaper)**<br>`custom-wallpaper` | <img src="./plugins/custom-wallpaper/assets/logo.png" width="96" height="96" alt="星夜美化" /> | **全景视觉与工作台交互深度强化**<br>• **视觉与插件卡片美化**：一键注入高清壁纸与磨砂毛玻璃效果；插件与技能卡片全新美化，支持一键打开本地文件夹。<br>• **对话框全能强化**：输入框支持插件快捷调用选项、常用提示词预设快捷选择、思考强度（Thinking Budget）滑块调节。<br>• **对话栏与右侧会话极速跳转**：右侧对话列表支持快速点击秒级跳转、进度条强化、支持一键下载导出完整对话、支持标记独立未读。<br>• **文件交互与开发辅助**：对话中的文件支持右键直接打开或定位所在文件夹。<br>• **系统级遥测与汉化**：底部常驻 Token 额度监控与未读对话雷达；760+ 词条无损一秒中英双向瞬切汉化引擎。 | CSS Variables / DOM Observer / Canvas / Python 测试套件 | [MIT](plugins/custom-wallpaper/LICENSE) |
+| **[浏览器控制](./plugins/browser-bridge)**<br>`browser-bridge` | <img src="./plugins/browser-bridge/assets/logo.png" width="96" height="96" alt="浏览器控制" /> | **日常浏览器深度直连与 RPA 录制回放**<br>• 直连日常已登录的 Edge / Chrome，保留原有的全部 Cookie、账号状态与扩展插件。<br>• 赋能 AI 自主执行网页调研、资料搜集、自动点击与复杂表单填写。<br>• **演示即生成 Skill**：在网页上操作一遍，即可自动提取可变参数并沉淀为专属 AI 技能，支持后续一键自动化快放。<br>• 悬浮录制胶囊支持划词备注与元素提取，具备视觉自愈与多窗口防冲突中继。 | MCP 协议 / Chrome MV3 扩展 / CDP 桥接 / 自动化回放 | [MIT](plugins/browser-bridge/LICENSE) |
 | **[电脑控制](./plugins/computer-use)**<br>`computer-use` | <img src="./plugins/computer-use/assets/logo.png" width="96" height="96" alt="电脑控制" /> | **系统级 Win32 原生桌面接管**<br>• 当目标软件没有提供开放 API 时，让 AI 直接识别屏幕画面、控制鼠标点击与键盘输入。<br>• 完整支持 4K / 带鱼屏 / 多屏超宽组合的高分屏缩放感知 (Per-monitor DPI)。<br>• 屏幕顶部常驻醒目的防误触控制横幅与真实鼠标轨迹，运行状态清晰透明。<br>• 原生 Win32 API 纯净驱动，零笨重外部环境依赖，兼顾极速响应与运行安全。 | Win32 GDI / UI Automation / Windows Native API | [MIT](plugins/computer-use/LICENSE) |
 | **[长期记忆](./plugins/mnemon)**<br>`mnemon` | <img src="./plugins/mnemon/assets/logo.png" width="96" height="96" alt="长期记忆" /> | **分层记忆金库与永恒人设引擎**<br>• 彻底解决多轮长对话中 AI 遗忘人设、习惯与项目决策的痛点。<br>• 运行时三层记忆体系 (`PERSONA` / `USER` / `MEMORY`)，对话启动前无感命中召回。<br>• 本地主金库与第二驱动器镜像原子双驱同步，配合每日 gzip 压缩快照，具备启动级自愈修复能力。<br>• 数据 100% 留存在本地磁盘，无需上传任何第三方云端，保障绝对数据隐私。 | 分层记忆引擎 / 语义+关键词混合索引 / 本地原子双驱镜像 | [MIT](plugins/mnemon/LICENSE) |
+| **[远程控制](./plugins/remote)**<br>`antigravity-remote-mogu` | <img src="./plugins/remote/assets/logo.png" width="96" height="96" alt="远程控制" /> | **微信 / QQ / 飞书跨端双向会话桥接**<br>• **多端接入与扫码绑定**：面板一键扫码绑定微信、QQ 或飞书机器人，手机发消息即可驱动桌面 Antigravity 会话。<br>• **全流程双向流式回推**：思考过程、工具调用进度与最终结论实时流式推送到手机聊天，产出的报告、代码、图片与附件直接原样发回聊天，无需守在电脑前。<br>• **双层桥接与无感后台执行**：结合 SQLite 会话元数据与 JSONL 运行转录，配合 CDP 执行器与全局互斥调度锁，电脑后台平稳运行，前台随意切换不中断。<br>• **多聊天并发防冲突**：群聊支持严格 @ 触发，单聊支持随时插话与排队执行，多设备随时随地无缝协同。 | Remote Hub / iLink 微信直连 / OneBot / 飞书 WSClient / CDP 会话调度 | [MIT](plugins/remote/LICENSE) |
 
 ---
 
@@ -41,7 +47,7 @@
 
 ### 方式一：一键全自动安装（推荐）
 
-克隆本仓库并在 PowerShell 中运行安装脚本，将自动把四大插件同步至 Antigravity 插件目录：
+克隆本仓库并在 PowerShell 中运行安装脚本，将自动把五大插件同步至 Antigravity 插件目录：
 
 ```powershell
 # 1. 克隆本仓库

@@ -1,0 +1,12 @@
+{
+  "antigravity-remote-mogu-autostart": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node \"C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity-remote-mogu\\scripts\\autostart-hook.mjs\"",
+        "timeout": 35
+      }
+    ]
+  }
+}

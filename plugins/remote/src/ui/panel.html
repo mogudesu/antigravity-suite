@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>antigravity远程-mogu</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d0f14; --panel: #161a22; --panel2: #1c212b; --line: #262c37;
+    --text: #e8eaf0; --muted: #8b94a5; --gold: #d9b26a; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px 18px 32px; background: var(--bg); color: var(--text);
+    font: 13px/1.6 ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
+  .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .update-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 12px;
+    border: 1px solid #5a4620; border-radius: 10px; background: linear-gradient(180deg, #3a2f16, #2a2210);
+    color: #f0d9a3; font-size: 12px; }
+  .update-bar[hidden] { display: none !important; }
+  .update-bar b { color: #ffe8b8; }
+  .update-bar a { color: #ffd98a; text-decoration: underline; }
+  .update-bar .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .update-bar button { padding: 3px 10px; font-size: 11px; background: rgba(255,255,255,.06); border-color: #5a4620; }
+
+  .pills { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--panel); color: var(--muted); font-size: 12px; }
+  .pill b { color: var(--text); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .tab { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent;
+    color: var(--muted); cursor: pointer; font: inherit; }
+  .tab[data-active="true"] { background: linear-gradient(180deg, #2a2318, #1d1a14); color: var(--gold); border-color: #4a3c1e; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+  .card header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .card h3 { font-size: 13px; margin: 0; flex: 1; }
+  .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.ok { color: var(--ok); border-color: #24512f; } .tag.warn { color: var(--warn); border-color: #4a3c16; }
+  .tag.bad { color: var(--bad); border-color: #4a2624; }
+  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .field label { color: var(--muted); font-size: 11px; }
+  input, select, textarea { width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2);
+    color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
+  button:hover { border-color: #3b4453; }
+  button.primary { background: linear-gradient(180deg, #3a2f16, #2a2210); border-color: #5a4620; color: #f0d9a3; }
+  button.danger { color: #ffb4ae; border-color: #4a2624; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .modal[data-open="true"] { display: flex; }
+  .sheet { width: min(520px, 92vw); max-height: 86vh; overflow: auto; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  .qr { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px; }
+  .qr img { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 10px; }
+  .toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 10px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel2); opacity: 0; transition: .18s ease; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.err { border-color: #4a2624; color: #ffb4ae; }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="updateBar" class="update-bar" hidden>
+  <span>有新版本 <b id="updateVersion"></b> 可用（当前 v<span id="updateCurrent"></span>）</span>
+  <span class="sp">
+    <button id="updateCopy">复制下载地址</button>
+    <a id="updateLink" href="#" target="_blank" rel="noreferrer">前往下载</a>
+    <button id="updateDismiss" aria-label="本次不再提示">×</button>
+  </span>
+</div>
+<div class="top">
+  <h1>antigravity远程-mogu</h1>
+  <div class="pills">
+    <span class="pill"><span id="wbDot" class="dot"></span>桥接 <b id="wbText">—</b></span>
+    <span class="pill">运行中 <b id="runText">0</b></span>
+    <span class="pill">待补发 <b id="deferText">0</b></span>
+    <span class="pill"><button id="diag" style="padding:2px 8px">诊断</button></span>
+    <span class="pill"><button id="refresh" style="padding:2px 8px">刷新</button></span>
+  </div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+<div id="roamBox"></div>
+<div class="grid" id="bots"></div>
+
+<div class="modal" id="modal">
+  <div class="sheet" id="sheet"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = location.origin;
+// 宿主（设置页注入的 iframe）用 ping/pong 确认面板真的启动起来了：
+// 父页与面板跨源，读不到 contentDocument，只有消息往返能区分「加载成功」和「连不上」。
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.agb === 'ping') {
+    try { event.source.postMessage({ agb: 'pong', origin: API }, '*'); } catch (e) { /* ignore */ }
+  }
+});
+let health = null;
+let bots = [];
+let bindings = [];
+let activePlatform = 'all';
+let roam = null;
+// 模型列表来自 /api/models（Antigravity 的模型菜单），只在启动/手动刷新时读，避免频繁开菜单
+const models = { loading: false, loaded: false, current: '', items: [], error: '' };
+const PLATFORM = {
+  weixin: { label: '微信', hint: '扫码绑定，免 PC 微信' },
+  qq: { label: 'QQ', hint: '官方机器人凭据，或 OneBot 反连' },
+  feishu: { label: '飞书', hint: '自建应用 AppID + Secret' },
+};
+
+const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+async function api(path, options = {}) {
+  const opts = { headers: {}, ...options };
+  if (opts.body && typeof opts.body !== 'string') {
+    opts.body = JSON.stringify(opts.body);
+    opts.headers['content-type'] = 'application/json';
+  }
+  const res = await fetch(API + path, opts);
+  const data = await res.json().catch(() => ({ ok: false, error: 'HTTP ' + res.status }));
+  if (!res.ok || data.ok === false) throw new Error(data.error || 'HTTP ' + res.status);
+  return data;
+}
+
+function toast(message, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = message;
+  el.className = 'toast show' + (isError ? ' err' : '');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { el.className = 'toast'; }, 3000);
+}
+
+function statusTag(status) {
+  const map = { online: ['ok', '在线'], listening: ['warn', '等待反连'], connecting: ['warn', '连接中'],
+    reconnecting: ['warn', '重连中'], 'need-scan': ['bad', '需扫码'], 'need-credentials': ['bad', '待填凭据'],
+    error: ['bad', '异常'], disconnected: ['bad', '已断开'], offline: ['bad', '已停止'], stopped: ['bad', '已停止'] };
+  const [kind, text] = map[status] || ['', status || '未知'];
+  return `<span class="tag ${kind}">${esc(text)}</span>`;
+}
+
+async function loadModels({ force = false } = {}) {
+  if (models.loading) return;
+  if (models.loaded && !force) return;
+  models.loading = true;
+  models.error = '';
+  renderBots();
+  try {
+    const data = await api('/api/models' + (force ? '?force=1' : ''));
+    models.items = data.items || [];
+    models.current = data.current || '';
+    models.error = data.ok ? '' : data.error || '读取失败';
+    models.loaded = Boolean(data.ok);
+  } catch (error) {
+    models.error = error.message;
+  } finally {
+    models.loading = false;
+    renderBots();
+  }
+}
+
+/** 模型下拉：第一项是"跟随界面"，避免用户手打错名字。 */
+function modelOptions(bot) {
+  const current = bot.defaultModel || '';
+  const items = models.items.slice();
+  if (current && !items.includes(current)) items.push(current);
+  const options = [`<option value="" ${current ? '' : 'selected'}>跟随界面当前模型${models.current ? `（${esc(models.current)}）` : ''}</option>`];
+  for (const item of items) {
+    const stale = current === item && !models.items.includes(item);
+    options.push(`<option value="${esc(item)}" ${current === item ? 'selected' : ''}>${esc(item)}${stale ? '（当前不可用）' : ''}</option>`);
+  }
+  return options.join('');
+}
+
+let roamDirty = false;
+let lastRoamSig = '';
+
+async function loadRoam({ force = false } = {}) {
+  try {
+    roam = await api('/api/proactive');
+  } catch {
+    roam = null;
+  }
+  try {
+    const ck = await api('/api/cookies' + (roam?.botId ? `?botId=${encodeURIComponent(roam.botId)}` : ''));
+    if (roam) roam.cookies = ck.platforms || [];
+  } catch { /* 没配置也不影响 */ }
+  renderRoam({ force });
+}
+
+function isEditingInRoam() {
+  const active = document.activeElement;
+  return Boolean(active?.closest?.('#roamBox') && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName));
+}
+
+function roamSignature() {
+  if (!roam) return '';
+  return JSON.stringify([
+    roam.config || {},
+    roam.gate?.sentToday,
+    roam.clock?.windows,
+    roam.clock?.next,
+    (roam.platforms || []).map((p) => [p.key, p.ready]),
+  ]);
+}
+
+function roamWindowRows(windows) {
+  return (windows || []).map((label) => {
+    const [start = '12:30', end = '13:45'] = String(label).split('-');
+    return { start, end };
+  });
+}
+
+function renderRoam({ force = false } = {}) {
+  const box = document.getElementById('roamBox');
+  if (!box) return;
+  if (!force && (roamDirty || isEditingInRoam())) return;
+  if (!roam) { box.innerHTML = ''; return; }
+  const sig = roamSignature();
+  if (!force && sig === lastRoamSig) return;
+  lastRoamSig = sig;
+  roamDirty = false;
+  const cfg = roam.config || {};
+  const gate = roam.gate || {};
+  const clock = roam.clock || {};
+  const platforms = roam.platforms || [];
+  const next = clock.next ? new Date(clock.next.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+  const on = Boolean(cfg.enabled);
+  const rows = roamWindowRows(clock.windows || []);
+  const bili = platforms.find((p) => p.key === 'bili') || {};
+  const flags = cfg.platforms || {};
+
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:12px">
+      <header>
+        <h3>主动漫游（${on ? '已开启' : '已关闭'}）</h3>
+        <span class="tag ${on ? 'ok' : ''}">今日 ${gate.sentToday || 0}/${gate.limit ?? 3}</span>
+        <span class="tag ${gate.silentDays >= 3 ? 'warn' : ''}">沉默 ${gate.silentDays || 0} 天</span>
+        <span class="tag">下次 ${next}</span>
+      </header>
+
+      <div class="row">
+        <div class="field"><label>开关</label>
+          <select id="roamEnabled">
+            <option value="false" ${on ? '' : 'selected'}>关闭</option>
+            <option value="true" ${on ? 'selected' : ''}>开启</option>
+          </select>
+        </div>
+        <div class="field"><label>随便翻翻的概率（0-1）</label><input id="roamSkip" value="${esc(String(clock.skipChance ?? 0.25))}"></div>
+        <div class="field"><label>每天最多推几条</label><input id="roamDaily" value="${esc(String(cfg.shareDaily ?? 3))}"></div>
+        <div class="field"><label>最低分（满分 20）</label><input id="roamMin" value="${esc(String(cfg.minScore ?? 13))}"></div>
+      </div>
+
+      <div class="field">
+        <label>时间段（每个窗口内随机挑一分钟醒来）</label>
+        <div id="roamWinRows" style="display:flex;flex-direction:column;gap:6px">
+          ${rows.map((row, index) => `
+            <div class="row" data-win="${index}" style="align-items:center;gap:8px">
+              <input type="time" data-win-start value="${esc(row.start)}" style="flex:1">
+              <span class="muted">到</span>
+              <input type="time" data-win-end value="${esc(row.end)}" style="flex:1">
+              <button data-win-del="${index}" class="danger" style="flex:0 0 auto">删除</button>
+            </div>`).join('')}
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <button id="roamAddWin">+ 添加时间段</button>
+          <button id="roamBatchToggle">批量粘贴</button>
+        </div>
+        <div id="roamBatch" style="display:none;margin-top:8px">
+          <textarea id="roamBatchText" rows="3" placeholder="每行一个时间段，例如：&#10;12:30-13:45&#10;20:30-23:30"></textarea>
+          <div class="actions" style="margin-top:6px"><button id="roamBatchApply">用这些替换上面的时间段</button></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>巡检平台（勾选才会去搜）</label>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
+          ${platforms.map((p) => `
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap">
+              <input type="checkbox" data-platform="${esc(p.key)}" ${flags[p.key] ?? p.enabled ? 'checked' : ''}>
+              ${esc(p.label)}
+              ${p.key === 'bili' ? `<span class="tag ${p.ready ? 'ok' : 'warn'}">${p.ready ? '已登录' : '未登录'}</span>` : ''}
+            </label>`).join('')}
+        </div>
+        <div class="muted" style="margin-top:6px;font-size:11px">${esc(bili.note || '')}</div>
+        <div class="actions" style="margin-top:8px">
+          <button id="biliLogin">${bili.ready ? 'B 站重新扫码' : 'B 站扫码登录'}</button>
+          <span class="muted" id="biliOut" style="align-self:center"></span>
+        </div>
+        <div id="biliQr" style="display:none;margin-top:10px;text-align:center">
+          <img alt="B站登录二维码" style="width:200px;height:200px;background:#fff;padding:8px;border-radius:10px">
+          <div class="muted" id="biliQrStatus" style="margin-top:6px">用手机 B 站扫一下</div>
+        </div>
+        <div class="actions" style="margin-top:10px">
+          <button id="cookieToggle">平台 Cookie（小红书 / 抖音 / X）</button>
+          <span class="muted" style="align-self:center;font-size:11px">这几个平台没有公开扫码接口，只能导入浏览器里的 Cookie</span>
+        </div>
+        <div id="cookieBox" style="display:none;margin-top:8px">
+          ${(roam.cookies || []).map((item) => {
+            const label = { xhs: '小红书', douyin: '抖音', twitter: 'X / Twitter' }[item.key] || item.key;
+            return `<div class="field">
+              <label>${esc(label)} ${item.configured ? '<span class="tag ok">已配置</span>' : '<span class="tag">未配置</span>'}</label>
+              <textarea data-cookie="${esc(item.key)}" rows="2" placeholder="粘贴该站点的 Cookie 字符串（从浏览器 DevTools → Network → 请求头里复制）"></textarea>
+            </div>`;
+          }).join('')}
+          <div class="actions"><button id="cookieSave">保存 Cookie</button><span class="muted" id="cookieOut" style="align-self:center"></span></div>
+        </div>
+      </div>
+
+      <div class="field"><label>偏好词（逗号分隔，影响选题）</label>
+        <input id="roamKeywords" value="${esc((cfg.keywords || []).join(', '))}" placeholder="AE 脚本, MCP, 开源工具">
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="roamSave">保存漫游设置</button>
+        <button id="roamNow">立即漫游一次</button>
+        <span class="muted" id="roamOut" style="align-self:center"></span>
+      </div>
+    </div>`;
+
+  const collectWindows = () => {
+    const out = [];
+    box.querySelectorAll('[data-win]').forEach((row) => {
+      const start = row.querySelector('[data-win-start]').value;
+      const end = row.querySelector('[data-win-end]').value;
+      if (start && end && start < end) out.push(`${start}-${end}`);
+    });
+    return out;
+  };
+
+  const repaintRows = (windows) => {
+    const container = box.querySelector('#roamWinRows');
+    container.innerHTML = roamWindowRows(windows).map((row, index) => `
+      <div class="row" data-win="${index}" style="align-items:center;gap:8px">
+        <input type="time" data-win-start value="${esc(row.start)}" style="flex:1">
+        <span class="muted">到</span>
+        <input type="time" data-win-end value="${esc(row.end)}" style="flex:1">
+        <button data-win-del="${index}" class="danger" style="flex:0 0 auto">删除</button>
+      </div>`).join('');
+    bindRowButtons();
+  };
+
+  const bindRowButtons = () => {
+    box.querySelectorAll('[data-win-del]').forEach((btn) => {
+      btn.onclick = () => {
+        const current = collectWindows();
+        current.splice(Number(btn.dataset.winDel), 1);
+        repaintRows(current);
+      };
+    });
+  };
+  bindRowButtons();
+
+  box.querySelector('#roamAddWin').onclick = () => {
+    const current = collectWindows();
+    current.push('12:30-13:45');
+    repaintRows(current);
+  };
+  box.querySelector('#roamBatchToggle').onclick = () => {
+    const panel = box.querySelector('#roamBatch');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  };
+  box.querySelector('#roamBatchApply').onclick = () => {
+    const text = box.querySelector('#roamBatchText').value;
+    const parsed = text.split(/[\n,，;；]+/).map((t) => t.trim()).filter(Boolean)
+      .map((token) => token.replace(/[~—–至到]/g, '-').replace(/(\d{1,2})[:：](\d{2})\s+(\d{1,2})[:：](\d{2})/, '$1:$2-$3:$4'))
+      .filter((token) => /^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/.test(token) && token.split('-')[0] < token.split('-')[1]);
+    if (!parsed.length) return toast('没解析出有效时间段', true);
+    repaintRows(parsed);
+    toast(`已导入 ${parsed.length} 个时间段，记得保存`);
+  };
+
+  // 平台 Cookie
+  box.querySelector('#cookieToggle').onclick = () => {
+    const area = box.querySelector('#cookieBox');
+    area.style.display = area.style.display === 'none' ? 'block' : 'none';
+  };
+  box.querySelector('#cookieSave').onclick = async () => {
+    const out = box.querySelector('#cookieOut');
+    out.textContent = '保存中…';
+    try {
+      const areas = [...box.querySelectorAll('[data-cookie]')];
+      for (const area of areas) {
+        await api('/api/cookies', {
+          method: 'POST',
+          body: { botId: roam.botId, platform: area.dataset.cookie, cookie: area.value.trim() },
+        });
+        area.value = '';
+      }
+      out.textContent = '已保存（只存本地，不会回显）';
+      await loadRoam();
+    } catch (error) {
+      out.textContent = '保存失败：' + error.message;
+    }
+  };
+
+  // B 站扫码
+  box.querySelector('#biliLogin').onclick = async () => {
+    const out = box.querySelector('#biliOut');
+    const wrap = box.querySelector('#biliQr');
+    const img = wrap.querySelector('img');
+    const status = box.querySelector('#biliQrStatus');
+    out.textContent = '正在申请二维码…';
+    try {
+      const data = await api('/api/bili/qrcode', { method: 'POST' });
+      wrap.style.display = 'block';
+      img.src = data.dataUrl;
+      status.textContent = '用手机 B 站扫一下';
+      out.textContent = '';
+      const poll = async () => {
+        for (let i = 0; i < 100; i += 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+          let res;
+          try {
+            res = await api('/api/bili/qrcode/' + encodeURIComponent(data.qrcodeKey));
+          } catch { return; }
+          if (res.status === 'wait') status.textContent = '等待扫码…';
+          else if (res.status === 'scanned') status.textContent = '已扫码，请在手机上确认';
+          else if (res.status === 'expired') { status.textContent = '二维码过期，重新点一次'; return; }
+          else if (res.status === 'confirmed') {
+            status.textContent = `已登录：${res.name || ''}`;
+            toast(`B 站已登录${res.name ? '：' + res.name : ''}`);
+            wrap.style.display = 'none';
+            await loadRoam();
+            return;
+          } else if (res.error) { status.textContent = '失败：' + res.error; return; }
+        }
+      };
+      poll();
+    } catch (error) {
+      out.textContent = '申请失败：' + error.message;
+    }
+  };
+
+  box.querySelector('#roamSave').onclick = async () => {
+    const botId = (roam.botId || bots[0]?.id || '');
+    if (!botId) return toast('先添加一个机器人', true);
+    const out = box.querySelector('#roamOut');
+    const windows = collectWindows();
+    if (!windows.length) return toast('至少留一个有效时间段（开始要早于结束）', true);
+    const platformFlags = {};
+    box.querySelectorAll('[data-platform]').forEach((input) => { platformFlags[input.dataset.platform] = input.checked; });
+    out.textContent = '保存中…';
+    try {
+      const data = await api('/api/proactive/config', {
+        method: 'POST',
+        body: {
+          botId,
+          proactive: {
+            enabled: box.querySelector('#roamEnabled').value === 'true',
+            windows,
+            skipChance: Number(box.querySelector('#roamSkip').value || 0.25),
+            shareDaily: Number(box.querySelector('#roamDaily').value || 3),
+            minScore: Number(box.querySelector('#roamMin').value || 13),
+            keywords: box.querySelector('#roamKeywords').value.split(/[,，]/).map((x) => x.trim()).filter(Boolean),
+            platforms: platformFlags,
+          },
+        },
+      });
+      out.textContent = '已保存，计划已重算';
+      roamDirty = false;
+      lastRoamSig = '';
+      roam = { ...roam, ...data, config: data.config };
+      renderRoam({ force: true });
+      await loadRoam();
+    } catch (error) {
+      out.textContent = '保存失败：' + error.message;
+    }
+  };
+
+  box.querySelector('#roamNow').onclick = async () => {
+    const btn = box.querySelector('#roamNow');
+    const out = box.querySelector('#roamOut');
+    btn.disabled = true;
+    out.textContent = '正在刷…（要拉字幕/弹幕，可能要十几秒）';
+    try {
+      const data = await api('/api/proactive/roam', { method: 'POST', body: { botId: roam.botId || bots[0]?.id } });
+      const pushed = data.pushed || [];
+      const skipped = data.skipped || [];
+      out.textContent = pushed.length
+        ? `推了 ${pushed.length} 条：${pushed.map((x) => x.title.slice(0, 14)).join(' / ')}`
+        : `没推：${skipped.slice(0, 2).map((x) => x.reason).join('；') || '没有候选'}`;
+      await loadRoam();
+    } catch (error) {
+      out.textContent = '失败：' + error.message;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+async function refresh() {
+  try {
+    health = await api('/api/health');
+    bots = (await api('/api/bots')).bots;
+    bindings = (await api('/api/state')).bindings || [];
+  } catch (error) {
+    toast('读取状态失败：' + error.message, true);
+    return;
+  }
+  const wb = health.workbench || {};
+  document.getElementById('wbDot').className = 'dot ' + (wb.connected ? 'ok' : (wb.ready ? 'warn' : 'bad'));
+  document.getElementById('wbText').textContent = wb.connected
+    ? `已连接 :${wb.port}`
+    : (wb.ready ? '待命（首次发送时连接）' : (wb.reason || '未连接'));
+  document.getElementById('wbText').title = wb.reason || (wb.title ? `目标：${wb.title}` : '');
+  document.getElementById('runText').textContent = health.running || 0;
+  document.getElementById('deferText').textContent = health.deferred || 0;
+  renderTabs();
+  renderBots();
+  if (!models.loaded && !models.loading) loadModels();
+  loadRoam();
+}
+
+// 周期性 refresh 不再无脑重绘：内容没变就不动 DOM，用户正在编辑时也不动
+let lastTabsSig = '';
+let lastBotsSig = '';
+
+function botsSignature() {
+  return JSON.stringify([
+    bots.map((b) => [
+      b.id, b.platform, b.alias, b.status, b.lastError || '', b.enabled !== false,
+      b.defaultWorkspace || '', b.defaultModel || '', b.defaultConversation || '',
+      b.busyMode || '', Boolean(b.allowAll), Boolean(b.syncEnabled), Boolean(b.groupAtOptional), b.ackEnabled !== false, b.ackEmoji || 'Get',
+    ]),
+    bindings.map((item) => [item.key, item.conversationId || '']),
+  ]);
+}
+
+function isEditingInBots() {
+  const active = document.activeElement;
+  if (!active) return false;
+  return Boolean(active.closest && active.closest('#bots') && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName));
+}
+
+function renderTabs() {
+  const counts = { all: bots.length, weixin: 0, qq: 0, feishu: 0 };
+  for (const bot of bots) counts[bot.platform] = (counts[bot.platform] || 0) + 1;
+  const tabsSig = JSON.stringify([activePlatform, counts]);
+  if (tabsSig === lastTabsSig) return;
+  lastTabsSig = tabsSig;
+  const tabs = [['all', '全部'], ['weixin', '微信'], ['qq', 'QQ'], ['feishu', '飞书']]
+    .map(([key, label]) => `<button class="tab" data-platform="${key}" data-active="${activePlatform === key}">${label} ${counts[key] || 0}</button>`)
+    .join('');
+  document.getElementById('tabs').innerHTML = tabs + `<button class="tab" id="addBot" data-active="false">+ 添加机器人</button>`;
+  document.querySelectorAll('#tabs .tab[data-platform]').forEach((btn) => {
+    btn.onclick = () => { activePlatform = btn.dataset.platform; renderTabs(); renderBots(); };
+  });
+  document.getElementById('addBot').onclick = () => openAddBot();
+}
+
+function renderBots({ force = false } = {}) {
+  const sig = botsSignature();
+  if (!force && (isEditingInBots() || sig === lastBotsSig)) return;
+  lastBotsSig = sig;
+  try {
+    renderBotsInner();
+  } catch (error) {
+    document.getElementById('bots').innerHTML =
+      `<div class="empty" style="color:#ffb4ae">面板渲染出错：${esc(error.message)}</div>`;
+  }
+}
+
+function renderBotsInner() {
+  const list = bots.filter((bot) => activePlatform === 'all' || bot.platform === activePlatform);
+  const box = document.getElementById('bots');
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">还没有机器人。点「+ 添加机器人」开始：微信 / QQ / 飞书 都支持扫码一键创建，也可以填凭据。</div>';
+    return;
+  }
+  box.innerHTML = list.map((bot) => `
+    <div class="card" data-id="${esc(bot.id)}">
+      <header>
+        <h3>${esc(bot.alias || bot.id)}</h3>
+        ${statusTag(bot.status)}
+        <span class="tag">${esc(PLATFORM[bot.platform]?.label || bot.platform)}</span>
+      </header>
+      <div class="field"><label>默认工作区</label>
+        <input data-field="defaultWorkspace" value="${esc(bot.defaultWorkspace || '')}" placeholder="F:/AI/nocode/nocode">
+      </div>
+      <div class="row">
+        <div class="field"><label>默认模型（自动读取可用列表）</label>
+          <select data-field="defaultModel">${modelOptions(bot)}</select>
+          <div class="muted" style="font-size:11px">
+            ${models.loading
+              ? '正在读取模型列表…'
+              : models.error
+                ? `读不到模型列表：${esc(models.error)}`
+                : `界面当前：${esc(models.current || '—')}`}
+          </div>
+        </div>
+        <div class="field"><label>忙碌策略</label>
+          <select data-field="busyMode">
+            <option value="queue" ${bot.busyMode !== 'steer' ? 'selected' : ''}>排队依次执行</option>
+            <option value="steer" ${bot.busyMode === 'steer' ? 'selected' : ''}>直接插话打断</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label>访问策略</label>
+          <select data-field="allowAll">
+            <option value="false" ${bot.allowAll ? '' : 'selected'}>仅主人 / 白名单</option>
+            <option value="true" ${bot.allowAll ? 'selected' : ''}>所有人可用</option>
+          </select>
+        </div>
+        <div class="field"><label>双向同步</label>
+          <select data-field="syncEnabled">
+            <option value="false" ${bot.syncEnabled ? '' : 'selected'}>关闭</option>
+            <option value="true" ${bot.syncEnabled ? 'selected' : ''}>桌面 ↔ 手机镜像</option>
+          </select>
+        </div>
+        <div class="field"><label>回执</label>
+          <select data-field="ackEnabled">
+            <option value="true" ${bot.ackEnabled === false ? '' : 'selected'}>收到时给个回执（飞书=表情，微信/QQ=短文本）</option>
+            <option value="false" ${bot.ackEnabled === false ? 'selected' : ''}>不回执（直接等结果）</option>
+          </select>
+        </div>
+        <div class="field"><label>回执表情（飞书）</label>
+          <select data-field="ackEmoji">
+            ${['Get', 'OK', 'DONE', 'CheckMark', 'OnIt', 'THUMBSUP', 'THANKS']
+              .map((e) => `<option value="${e}" ${(bot.ackEmoji || 'Get') === e ? 'selected' : ''}>${e}${e === 'Get' ? '（收到）' : ''}</option>`)
+              .join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>群聊</label>
+        <select data-field="groupAtOptional">
+          <option value="false" ${bot.groupAtOptional ? '' : 'selected'}>必须 @机器人</option>
+          <option value="true" ${bot.groupAtOptional ? 'selected' : ''}>群里不 @ 也响应</option>
+        </select>
+      </div>
+      <div class="field"><label>绑定会话</label>
+        <select data-field="binding"></select>
+        <div class="muted" style="font-size:11px;margin-top:4px">不指定 = 清空旧绑定，下条消息自动新开对话，之后继续用新会话</div>
+      </div>
+      ${bot.lastError ? `<div class="muted" style="color:#ffb4ae">${esc(bot.lastError)}</div>` : ''}
+      <div class="actions">
+        <button data-act="save" class="primary">保存</button>
+        <button data-act="test">发测试消息</button>
+        <button data-act="self-test">自检一次</button>
+        <button data-act="reload-models">重新读取模型</button>
+        <button data-act="scan">${bot.platform === 'weixin' ? '重新扫码' : '重新连接'}</button>
+        <button data-act="remove" class="danger">移除</button>
+      </div>
+    </div>`).join('');
+
+  document.querySelectorAll('#bots .card').forEach((card) => wireCard(card, bots.find((b) => b.id === card.dataset.id)));
+}
+
+async function wireCard(card, bot) {
+  const bindingSelect = card.querySelector('[data-field="binding"]');
+  try {
+    const data = await api('/api/conversations?limit=30' + (bot.defaultWorkspace ? `&workspace=${encodeURIComponent(bot.defaultWorkspace)}` : ''));
+    const bindings = await api('/api/state');
+    const mine = (bindings.bindings || []).filter((item) => item.key.startsWith(bot.id + ':'));
+    // 只反映这个聊天的绑定；没绑定就停在「不指定」
+    const current = mine[0]?.conversationId || '';
+    bindingSelect.innerHTML = `<option value="">— 不指定（自动新开对话）—</option>` +
+      (data.items || []).map((item) => `<option value="${esc(item.id)}" ${item.id === current ? 'selected' : ''}>${esc(item.title || item.id.slice(0, 8))} [${esc(item.status)}]</option>`).join('');
+    bindingSelect.dataset.chatId = mine[0]?.chatId || '';
+  } catch {
+    bindingSelect.innerHTML = '<option value="">（读取会话失败）</option>';
+  }
+
+  card.querySelectorAll('[data-act]').forEach((btn) => {
+    btn.onclick = async () => {
+      const act = btn.dataset.act;
+      const patch = { id: bot.id, platform: bot.platform };
+      card.querySelectorAll('[data-field]').forEach((el) => {
+        if (el.dataset.field === 'binding') return;
+        const key = el.dataset.field;
+        patch[key] = ['allowAll', 'syncEnabled', 'groupAtOptional', 'ackEnabled'].includes(key) ? el.value === 'true' : el.value;
+      });
+      try {
+        if (act === 'save') {
+          await api(`/api/bots/${bot.id}`, { method: 'POST', body: patch });
+          // 下拉只决定"这个聊天发到哪个对话"：选了就绑定，选"不指定"就清空该机器人全部旧绑定
+          const convId = bindingSelect.value;
+          const chatId = bindingSelect.dataset.chatId;
+          if (convId) {
+            if (chatId) {
+              await api('/api/bind', { method: 'POST', body: { botId: bot.id, chatId, conversationId: convId } });
+            } else {
+              toast('已保存。这个机器人还没有私聊记录，先在手机上发一条消息再绑定对话');
+              lastBotsSig = '';
+              await refresh();
+              return;
+            }
+          } else {
+            await api('/api/unbind', { method: 'POST', body: { botId: bot.id, all: true } });
+          }
+          toast('已保存');
+          lastBotsSig = '';
+          lastTabsSig = '';
+          await refresh();
+        } else if (act === 'self-test') {
+          btn.disabled = true;
+          try {
+            const data = await api('/api/self-test', { method: 'POST', body: { botId: bot.id, text: '自检：只回复两个字 收到' } });
+            const conv = data.result?.result?.conversationId || '';
+            const reply = (data.replies || []).map((r) => r.text).filter(Boolean).pop() || '';
+            toast(`自检通过：${conv ? '会话 ' + conv.slice(0, 8) + ' ' : ''}回复「${reply.slice(0, 20)}」`);
+            lastBotsSig = '';
+            await refresh();
+          } catch (error) {
+            toast('自检失败：' + error.message, true);
+          } finally {
+            btn.disabled = false;
+          }
+        } else if (act === 'reload-models') {
+          await loadModels({ force: true });
+          toast('模型列表已刷新');
+        } else if (act === 'test') {
+          await api('/api/test-message', { method: 'POST', body: { botId: bot.id, chatId: bindingSelect.dataset.chatId || '', text: 'antigravity远程-mogu 连接测试 ✅' } });
+          toast('测试消息已发送');
+        } else if (act === 'scan') {
+          if (bot.platform === 'weixin') await openScan(bot.id);
+          else { await api(`/api/bots/${bot.id}`, { method: 'POST', body: { ...patch, enabled: true } }); toast('已请求重连'); await refresh(); }
+        } else if (act === 'remove') {
+          if (!confirm(`移除机器人「${bot.alias || bot.id}」？`)) return;
+          await api(`/api/bots/${bot.id}`, { method: 'DELETE' });
+          toast('已移除');
+          await refresh();
+        }
+      } catch (error) {
+        toast('操作失败：' + error.message, true);
+      }
+    };
+  });
+}
+
+// ---------------------------------------------------------------- 添加机器人
+
+const ADD_HINT = {
+  weixin: '扫码绑定，免 PC 微信、免公网。',
+  qq: '扫码一键创建官方机器人（自动回填 AppID/AppSecret），也可以手动填凭据或走 OneBot。',
+  feishu: '扫码一键创建应用并配好消息权限；也可以手动填 App ID / Secret。',
+};
+
+function openAddBot(platform = 'weixin') {
+  cancelScan();
+  const modal = document.getElementById('modal');
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `
+    <h2 style="margin:0 0 4px;font-size:15px">添加机器人</h2>
+    <div class="muted" style="margin-bottom:12px">${esc(ADD_HINT[platform] || '')}</div>
+    <div class="tabs" style="margin:0 0 12px">
+      ${['weixin', 'qq', 'feishu'].map((key) => `<button class="tab" data-pick="${key}" data-active="${platform === key}">${PLATFORM[key].label}</button>`).join('')}
+    </div>
+    <div id="addBody"></div>`;
+  modal.dataset.open = 'true';
+  const body = sheet.querySelector('#addBody');
+
+  sheet.querySelectorAll('[data-pick]').forEach((btn) => {
+    btn.onclick = () => {
+      if (btn.dataset.active === 'true') return;
+      cancelScan();
+      sheet.querySelectorAll('[data-pick]').forEach((b) => { b.dataset.active = String(b === btn); });
+      sheet.querySelector('.muted').textContent = ADD_HINT[btn.dataset.pick] || '';
+      renderAdd(body, btn.dataset.pick);
+    };
+  });
+
+  renderAdd(body, platform);
+}
+
+function renderAdd(body, platform) {
+  const modes = platform === 'weixin'
+    ? [['scan', '扫码绑定']]
+    : [['scan', '扫码创建（推荐）'], ['manual', '填凭据']];
+  body.innerHTML = `
+    <div class="tabs" style="margin:0 0 12px">
+      ${modes.map(([mode, label], index) => `<button class="tab" data-mode="${mode}" data-active="${index === 0}">${label}</button>`).join('')}
+    </div>
+    <div id="modeBody"></div>`;
+  const modeBody = body.querySelector('#modeBody');
+  const paint = (mode) => {
+    cancelScan();
+    body.querySelectorAll('[data-mode]').forEach((btn) => { btn.dataset.active = String(btn.dataset.mode === mode); });
+    if (mode === 'scan') paintScan(modeBody, platform);
+    else paintManual(modeBody, platform);
+  };
+  body.querySelectorAll('[data-mode]').forEach((btn) => { btn.onclick = () => paint(btn.dataset.mode); });
+  paint('scan');
+}
+
+const SCAN_HINT = {
+  weixin: '用手机微信扫下面的二维码确认即可（不需要 PC 微信）。',
+  qq: '用手机 QQ 扫码，会自动创建/选择机器人并回填 AppID/AppSecret。',
+  feishu: '用手机飞书扫码，会自动创建应用并配好消息权限。',
+};
+
+function paintScan(box, platform) {
+  box.innerHTML = `
+    <div class="muted" style="margin-bottom:10px">${esc(SCAN_HINT[platform] || '')}</div>
+    <button class="primary" id="doScan">生成二维码</button>
+    <div id="scanBox" class="qr"></div>`;
+  box.querySelector('#doScan').onclick = () => startScan(box, platform);
+}
+
+// 扫码会话：同一时刻只允许一个轮询在跑（切平台/切模式/关弹窗都会作废旧的）
+let scanToken = 0;
+let activeScan = null; // { token, sessionId, platform }
+
+const SCAN_TEXT = {
+  wait: '请用手机扫码',
+  scaned: '已扫码，请在手机上确认',
+  polling: '等待扫码…',
+  confirmed: '已确认，正在绑定…',
+  success: '已确认，正在绑定…',
+  bound: '已绑定',
+  expired: '二维码已过期，点「生成二维码」重来',
+  cancelled: '已取消',
+};
+
+/** 作废当前扫码：停轮询 + 通知后端别再拉平台接口。 */
+function cancelScan() {
+  scanToken += 1;
+  const previous = activeScan;
+  activeScan = null;
+  if (previous?.sessionId) {
+    fetch(API + '/api/scan/' + previous.sessionId, { method: 'DELETE' }).catch(() => {});
+  }
+}
+
+async function startScan(box, platform) {
+  cancelScan();
+  const token = scanToken;
+  const holder = box.querySelector('#scanBox');
+  if (!holder) return;
+  holder.innerHTML = '<div class="muted">正在申请二维码…</div>';
+
+  let session;
+  try {
+    ({ session } = await api('/api/scan', { method: 'POST', body: { platform } }));
+  } catch (error) {
+    if (token === scanToken) holder.innerHTML = `<div class="muted" style="color:#ffb4ae">申请失败：${esc(error.message)}</div>`;
+    return;
+  }
+  if (token !== scanToken || !holder.isConnected) {
+    // 用户已经切走/关掉了：把刚建的会话也撤掉，别让它继续拉平台接口
+    fetch(API + '/api/scan/' + session.id, { method: 'DELETE' }).catch(() => {});
+    return;
+  }
+
+  activeScan = { token, sessionId: session.id, platform };
+  holder.innerHTML = `
+    ${session.qrcodeImage ? `<img alt="二维码" src="${session.qrcodeImage}">` : '<div class="muted">二维码生成中…</div>'}
+    <div class="muted agb-scan-status">${SCAN_TEXT[session.status] || '请用手机扫码'}</div>`;
+
+  pollScan({ token, holder, sessionId: session.id });
+}
+
+async function pollScan({ token, holder, sessionId }) {
+  const statusEl = () => holder.querySelector('.agb-scan-status');
+  for (let i = 0; i < 240; i += 1) {
+    await new Promise((r) => setTimeout(r, 1500));
+    // 关键：会话被切走 / 弹窗关了 / 节点被替换，就立刻停，绝不写到别的框里
+    if (token !== scanToken || !holder.isConnected) return;
+
+    let session;
+    try {
+      session = (await api('/api/scan/' + sessionId)).session;
+    } catch {
+      return;
+    }
+    if (token !== scanToken || !holder.isConnected) return;
+
+    if (session.qrcodeImage) {
+      let el = holder.querySelector('img');
+      if (!el) {
+        holder.insertAdjacentHTML('afterbegin', `<img alt="二维码" src="${session.qrcodeImage}">`);
+        const tip = holder.querySelector('.muted:not(.agb-scan-status)');
+        if (tip) tip.remove();
+      } else if (el.getAttribute('src') !== session.qrcodeImage) {
+        el.setAttribute('src', session.qrcodeImage);
+      }
+    }
+
+    const label = statusEl();
+    if (label) label.textContent = SCAN_TEXT[session.status] || session.status;
+
+    if (session.status === 'bound') {
+      activeScan = null;
+      toast('机器人已绑定');
+      document.getElementById('modal').dataset.open = 'false';
+      await refresh();
+      return;
+    }
+    if (['expired', 'error', 'cancelled'].includes(session.status)) {
+      activeScan = null;
+      if (label) label.textContent = `${SCAN_TEXT[session.status] || session.status}${session.error ? '：' + session.error : ''}`;
+      return;
+    }
+  }
+}
+
+document.getElementById('refresh').onclick = () => refresh();
+document.getElementById('modal').onclick = (event) => {
+  if (event.target.id !== 'modal') return;
+  cancelScan();
+  document.getElementById('modal').dataset.open = 'false';
+};
+
+const eventLog = [];
+// 面板里任何未捕获的错误都提示出来，避免"点了没反应/界面像崩了"
+window.addEventListener('error', (event) => toast('面板脚本出错：' + (event.message || '未知'), true));
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  toast('请求失败：' + (reason?.message || reason || '未知错误'), true);
+});
+
+const events = new EventSource('/api/events');
+for (const name of ['message', 'reply', 'progress', 'scan', 'mirror']) {
+  events.addEventListener(name, (ev) => {
+    try {
+      eventLog.push({ at: new Date().toLocaleTimeString(), name, data: JSON.parse(ev.data) });
+    } catch {
+      eventLog.push({ at: new Date().toLocaleTimeString(), name, data: {} });
+    }
+    if (eventLog.length > 80) eventLog.shift();
+    if (name !== 'progress') refresh();
+  });
+}
+
+document.getElementById('diag').onclick = async () => {
+  const modal = document.getElementById('modal');
+  const sheet = document.getElementById('sheet');
+  let healthText = '';
+  try {
+    healthText = JSON.stringify(await api('/api/health'), null, 2);
+  } catch (error) {
+    healthText = '读取失败：' + error.message;
+  }
+  sheet.innerHTML = `
+    <h2 style="margin:0 0 8px;font-size:15px">诊断</h2>
+    <div class="field"><label>桥接与机器人状态</label>
+      <pre style="margin:0;padding:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;font-size:11px">${esc(healthText)}</pre>
+    </div>
+    <div class="field"><label>最近事件（${eventLog.length}）</label>
+      <div style="max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:4px">
+        ${eventLog.slice(-25).reverse().map((item) => `<div class="muted" style="font-size:11px"><code>${esc(item.at)}</code> ${esc(item.name)} ${esc(JSON.stringify(item.data).slice(0, 120))}</div>`).join('') || '<div class="muted">还没有事件</div>'}
+      </div>
+    </div>
+    <div class="muted">完整日志：<code>~/.gemini/memory/antigravity-remote/logs/hub.log</code></div>
+    <div class="actions"><button class="primary" id="closeDiag">关闭</button></div>`;
+  modal.dataset.open = 'true';
+  sheet.querySelector('#closeDiag').onclick = () => { modal.dataset.open = 'false'; };
+};
+
+const roamBoxEl = document.getElementById('roamBox');
+roamBoxEl.addEventListener('input', () => { roamDirty = true; });
+roamBoxEl.addEventListener('change', () => { roamDirty = true; });
+
+async function refreshUpdate() {
+  try {
+    const info = await api('/api/update');
+    const bar = document.getElementById('updateBar');
+    if (!info.hasUpdate || localStorage.getItem('agUpdateDismissed') === String(info.latest)) {
+      bar.hidden = true;
+      return;
+    }
+    document.getElementById('updateVersion').textContent = 'v' + info.latest;
+    document.getElementById('updateCurrent').textContent = info.current || '';
+    const link = document.getElementById('updateLink');
+    link.href = info.url;
+    link.onclick = (event) => {
+      event.preventDefault();
+      window.open(info.url, '_blank', 'noopener');
+    };
+    document.getElementById('updateCopy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(info.url);
+        toast('下载地址已复制');
+      } catch {
+        toast('复制失败', true);
+      }
+    };
+    document.getElementById('updateDismiss').onclick = () => {
+      localStorage.setItem('agUpdateDismissed', String(info.latest));
+      bar.hidden = true;
+    };
+    bar.hidden = false;
+  } catch {
+    // 没有网络或 GitHub 不可达时静默，不打扰使用
+  }
+}
+
+refresh();
+refreshUpdate();
+setInterval(refresh, 15000);
+setInterval(refreshUpdate, 6 * 3600 * 1000);
+</script>
+</body>
+</html>

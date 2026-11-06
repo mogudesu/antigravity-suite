@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "antigravity-remote-mogu": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity-remote-mogu\\src\\mcp\\remote-mcp-server.mjs"
+      ],
+      "env": {
+        "AG_REMOTE_HOME": "C:\\Users\\25350\\.gemini\\memory\\antigravity-remote",
+        "AG_REMOTE_API": "http://127.0.0.1:8791"
+      }
+    }
+  }
+}

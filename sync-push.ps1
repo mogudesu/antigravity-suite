@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     一键将本地运行中的 Antigravity 插件变更同步到本仓库，并自动提交推送到 GitHub。
 .EXAMPLE
@@ -19,7 +19,8 @@ $Mapping = @(
     @{ Src = "Antigravity 星夜美化-mogu"; Dest = "custom-wallpaper" },
     @{ Src = "antigravity-browser-bridge"; Dest = "browser-bridge" },
     @{ Src = "antigravity computer use-mogu"; Dest = "computer-use" },
-    @{ Src = "antigravity长期记忆-mogu"; Dest = "mnemon" }
+    @{ Src = "antigravity长期记忆-mogu"; Dest = "mnemon" },
+    @{ Src = "antigravity-remote-mogu"; Dest = "remote" }
 )
 
 Write-Host ">>> 正在从本地 Antigravity 插件目录同步最新代码..." -ForegroundColor Cyan

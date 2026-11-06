@@ -1,0 +1,76 @@
+{
+  "input": [
+    "[data-testid=\"agent-input-box\"] [aria-label=\"Message input\"]",
+    "div[aria-label=\"Message input\"][contenteditable=\"true\"]",
+    "div[contenteditable=\"true\"][role=\"combobox\"]",
+    "div[data-lexical-editor=\"true\"]",
+    "textarea[placeholder]"
+  ],
+  "inputBox": [
+    "[data-testid=\"agent-input-box\"]"
+  ],
+  "sendButton": [
+    "[data-testid=\"send-button\"]",
+    "button.agy-send-button",
+    "button[aria-label=\"Send message\"]"
+  ],
+  "cancelButton": [
+    "[data-testid=\"agent-input-box\"] button[aria-label*=\"Cancel\"]",
+    "[data-testid=\"agent-input-box\"] button[aria-label*=\"Stop\"]",
+    "[data-testid=\"cancel-button\"]",
+    "button[aria-label*=\"Stop generating\"]"
+  ],
+  "busy": [
+    "[aria-busy=\"true\"]"
+  ],
+  "viewport": [
+    "[data-testid=\"autoscroll-viewport\"]"
+  ],
+  "article": [
+    "[role=\"article\"]"
+  ],
+  "assistantLabel": "Agent response",
+  "userLabel": "User message",
+  "fileLink": [
+    "[data-uri]"
+  ],
+  "newConversation": [
+    "[data-testid=\"new-conversation-button\"]",
+    "[data-testid=\"app-icon-new-conversation-button\"]"
+  ],
+  "conversationRow": [
+    "[data-testid=\"conversation-row-sidebar\"]",
+    "[data-testid=\"conversation-list-sidebar\"] a"
+  ],
+  "projectHeader": [
+    "[data-testid=\"project-header\"]"
+  ],
+  "modelTrigger": [
+    "[data-testid=\"model-selector-trigger\"]"
+  ],
+  "modelMenu": [
+    "[role=\"menu\"]"
+  ],
+  "approvalScope": [
+    "[role=\"dialog\"]",
+    "[role=\"alertdialog\"]",
+    "[data-testid*=\"permission\"]"
+  ],
+  "approvalTexts": [
+    "allow once",
+    "allow always",
+    "allow",
+    "approve",
+    "accept",
+    "deny",
+    "reject",
+    "run",
+    "允许一次",
+    "始终允许",
+    "允许",
+    "同意",
+    "拒绝",
+    "运行",
+    "执行"
+  ]
+}
