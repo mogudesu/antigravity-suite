@@ -14,6 +14,24 @@ function getRecordingsDir() {
     path.join(os.homedir(), ".gemini", "memory", "browser-bridge", "recordings");
 }
 
+function resolveReal(p) {
+  const abs = path.resolve(String(p || ""));
+  try { return fs.realpathSync(abs); } catch (e) {
+    const parent = path.dirname(abs);
+    try { return path.join(fs.realpathSync(parent), path.basename(abs)); } catch (e2) { return abs; }
+  }
+}
+
+function canonicalInside(baseDir, targetPath) {
+  if (!baseDir || !targetPath) return false;
+  const base = resolveReal(baseDir);
+  const target = resolveReal(targetPath);
+  const rel = process.platform === "win32"
+    ? path.relative(base.toLowerCase(), target.toLowerCase())
+    : path.relative(base, target);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 function sanitizeId(id) {
   return String(id || "").replace(/[^a-zA-Z0-9._-]/g, "_");
 }
@@ -191,56 +209,101 @@ function listRecordings(limit = 20) {
   return items;
 }
 
-function loadRecording(idOrPath) {
+function loadRecording(idOrPath, opts = {}) {
   const dir = getRecordingsDir();
   if (!idOrPath || idOrPath === "latest") {
     const list = listRecordings(1);
     if (!list.length) return null;
     return JSON.parse(fs.readFileSync(list[0].filePath, "utf8"));
   }
-  if (fs.existsSync(idOrPath) && fs.statSync(idOrPath).isFile()) {
-    return JSON.parse(fs.readFileSync(idOrPath, "utf8"));
+  const raw = String(idOrPath).trim();
+  const hasPathSyntax = raw.includes("/") || raw.includes("\\") || raw.includes("..") || path.isAbsolute(raw);
+  if (hasPathSyntax) {
+    const resolved = resolveReal(raw);
+    const insideRec = canonicalInside(dir, resolved);
+    const isWorkflowFile = !!opts.allowWorkflowFile && path.basename(resolved).toLowerCase() === "workflow.recording.json";
+    if (!insideRec && !isWorkflowFile) {
+      throw new Error("安全策略拒绝读取录制目录之外的 JSON 文件：" + raw);
+    }
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+      return JSON.parse(fs.readFileSync(resolved, "utf8"));
+    }
+    return null;
   }
-  const candidate = path.join(dir, sanitizeId(idOrPath).replace(/\.json$/i, "") + ".json");
-  if (fs.existsSync(candidate)) {
+  const candidate = path.join(dir, sanitizeId(raw).replace(/\.json$/i, "") + ".json");
+  if (!canonicalInside(dir, candidate)) {
+    throw new Error("安全策略拒绝非法录制 ID：" + raw);
+  }
+  if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
     return JSON.parse(fs.readFileSync(candidate, "utf8"));
   }
   return null;
 }
 
+function applyFilter(value, filter) {
+  switch (filter) {
+    case "url":
+    case "encodeURIComponent": return encodeURIComponent(String(value));
+    case "upper": return String(value).toUpperCase();
+    case "lower": return String(value).toLowerCase();
+    case "json": return JSON.stringify(value);
+    case "trim": return String(value).trim();
+    default: return String(value);
+  }
+}
+
+/** 支持 {{key}} 与 {{key|url}}、{{key|json}} 等过滤器；未定义变量原样保留给运行时解析。 */
 function interpolateString(str, vars, paramDefs) {
   if (typeof str !== "string") return str;
-  return str.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, key) => {
-    if (vars && vars[key] !== undefined && vars[key] !== null) return String(vars[key]);
-    if (paramDefs && paramDefs[key] && paramDefs[key].default !== undefined) return String(paramDefs[key].default);
-    return "{{" + key + "}}";
+  return str.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*(?:\|\s*([a-zA-Z0-9_]+)\s*)?\}\}/g, (whole, key, filter) => {
+    let v;
+    if (vars && vars[key] !== undefined && vars[key] !== null) v = vars[key];
+    else if (paramDefs && paramDefs[key] && paramDefs[key].default !== undefined) v = paramDefs[key].default;
+    else return whole; // 运行时变量：连过滤器一起原样留给 SW 阶段解析
+    return filter ? applyFilter(v, filter) : String(v);
   });
+}
+
+/**
+ * 深度插值：递归处理 loop/if/retry 的嵌套 steps、expression、items 等所有字段。
+ * 整串恰好是 {{arrayVar}} 且值为数组/对象时保留原类型，避免 loop.items 被
+ * String(array) 拍成 "a,b"。
+ */
+function interpolateValue(value, vars, paramDefs) {
+  if (typeof value === "string") {
+    const m = /^\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}$/.exec(value);
+    if (m) {
+      const k = m[1];
+      const v = (vars && vars[k] !== undefined && vars[k] !== null)
+        ? vars[k]
+        : (paramDefs && paramDefs[k] && paramDefs[k].default !== undefined ? paramDefs[k].default : undefined);
+      if (v !== undefined && typeof v === "object") return v;
+    }
+    return interpolateString(value, vars, paramDefs);
+  }
+  if (Array.isArray(value)) return value.map((x) => interpolateValue(x, vars, paramDefs));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = interpolateValue(v, vars, paramDefs);
+    return out;
+  }
+  return value;
 }
 
 function interpolateSteps(steps, vars = {}, paramDefs = {}) {
   if (!Array.isArray(steps)) return [];
-  return steps.map((s) => {
-    const copy = JSON.parse(JSON.stringify(s));
-    if (typeof copy.url === "string") copy.url = interpolateString(copy.url, vars, paramDefs);
-    if (typeof copy.value === "string") copy.value = interpolateString(copy.value, vars, paramDefs);
-    if (typeof copy.label === "string") copy.label = interpolateString(copy.label, vars, paramDefs);
-    if (typeof copy.text === "string") copy.text = interpolateString(copy.text, vars, paramDefs);
-    if (copy.locator && typeof copy.locator.selector === "string") {
-      copy.locator.selector = interpolateString(copy.locator.selector, vars, paramDefs);
-    }
-    if (copy.locator && copy.locator.semantic && typeof copy.locator.semantic.text === "string") {
-      copy.locator.semantic.text = interpolateString(copy.locator.semantic.text, vars, paramDefs);
-    }
-    return copy;
-  });
+  return steps.map((s) => interpolateValue(s, vars, paramDefs));
 }
 
 module.exports = {
   getRecordingsDir,
+  canonicalInside,
   cleanAndCoalesceSteps,
   extractSuggestedParameters,
   saveRecording,
   listRecordings,
   loadRecording,
+  interpolateString,
+  interpolateValue,
   interpolateSteps,
 };

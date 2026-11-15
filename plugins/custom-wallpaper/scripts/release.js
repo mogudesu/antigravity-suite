@@ -49,10 +49,30 @@ const COMPONENTS = [
   { name: "mnemon", zipBase: "antigravity-mnemon", nodeModules: false },
   { name: "computer-use", zipBase: "antigravity-computer-use", nodeModules: false },
   { name: "antigravity-browser-bridge", zipBase: "antigravity-browser-bridge", nodeModules: true },
+  { name: "antigravity-remote-mogu", zipBase: "antigravity-remote-mogu", nodeModules: true },
 ];
 
 const excludedDirs = new Set([".git", ".github", "dist", "snapshots", "__pycache__", ".venv"]);
-const excludedFiles = /(?:^|[\\/])(?:runtime\.json|update-state\.json|.*\.pyc|.*\.log|.*\.tmp|.*\.bak)$/i;
+const excludedFiles = /(?:^|[\\/])(?:runtime\.json|update-state\.json|\.sidecar-lock\.json|\.sidecar-token|custom-wallpaper\.(?:jpg|jpeg|png|webp)|.*\.pyc|.*\.log|.*\.tmp|.*\.bak)$/i;
+
+function copyTreeSafe(sourceDir, targetDir, filterFn) {
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const srcPath = path.join(sourceDir, entry.name);
+    if (filterFn && !filterFn(srcPath)) continue;
+    const dstPath = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyTreeSafe(srcPath, dstPath, filterFn);
+    } else if (entry.isSymbolicLink()) {
+      const resolved = fs.realpathSync(srcPath);
+      const stat = fs.statSync(resolved);
+      if (stat.isDirectory()) copyTreeSafe(resolved, dstPath, filterFn);
+      else fs.copyFileSync(resolved, dstPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
+}
 
 function findPluginDir(name) {
   if (!fs.existsSync(pluginsDir)) return "";
@@ -117,7 +137,7 @@ function buildComponent(spec) {
   const zipPath = path.join(outDir, zipName);
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), "ag-suite-release-"));
   try {
-    fs.cpSync(source, staging, { recursive: true, filter: copyFilter(source, spec.nodeModules) });
+    copyTreeSafe(source, staging, copyFilter(source, spec.nodeModules));
     if (spec.theme) {
       fs.mkdirSync(path.join(staging, "config"), { recursive: true });
       fs.writeFileSync(

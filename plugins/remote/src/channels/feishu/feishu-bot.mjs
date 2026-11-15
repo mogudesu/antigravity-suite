@@ -16,7 +16,7 @@ const FEISHU_IMAGE_LIMIT = 10 * 1024 * 1024;
 const FEISHU_FILE_LIMIT = 30 * 1024 * 1024;
 
 export class FeishuBot {
-  constructor({ bot, secrets, hub, logger = console }) {
+  constructor({ bot, secrets, hub, logger = console, seenIds = [], onSeen = null }) {
     this.bot = bot;
     this.secrets = secrets;
     this.hub = hub;
@@ -25,7 +25,7 @@ export class FeishuBot {
     this.ws = null;
     this.status = 'offline';
     this.lastError = '';
-    this.dedupe = new Dedupe();
+    this.dedupe = new Dedupe({ limit: 500, initial: seenIds, onChange: onSeen });
     this.cards = new Map(); // chatId -> { messageId, lastText, timer, patchable, replyTo }
     this.lastInbound = new Map(); // chatId -> 最近一条用户消息的 message_id（用于引用回复）
     this.ackReactions = new Map(); // chatId -> { messageId, emoji }，思考结束后要撤掉这颗「GET」

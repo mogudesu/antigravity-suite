@@ -22,9 +22,9 @@ import { DEFAULT_CONFIG, STRATEGIES, mergeConfig } from './config.mjs';
 const PERSONA_TEMPLATE = `# PERSONA.md - AI persona and interaction style
 
 <!-- Highest-priority resident volume: who the assistant is, how it speaks, what it
-     values in code, and what it must never do. Injected on every SessionStart and
-     never truncated by the resident budget. Edit it through mnemon_memory_runtime_write
-     with kind: "persona". One short line per rule. -->
+     values in code, and what it must never do. Injected at SessionStart and
+     never truncated by the resident budget. Edit it through memory_profile
+     with action: "set_persona". One short line per rule. -->
 
 ## Identity
 - Name: (set one)
@@ -186,14 +186,16 @@ export class MnemonEngine {
   }
 
   setConfig(patch = {}) {
-    const next = mergeConfig(this.config(), patch || {});
-    if (patch.strategy && !STRATEGIES.includes(patch.strategy)) {
-      throw new Error(`unknown strategy "${patch.strategy}" (expected one of ${STRATEGIES.join(', ')})`);
-    }
-    store.writeJSON(this.p.config, next);
-    this._config = next;
-    this._configSig = fileSignature(this.p.config);
-    return next;
+    return store.withVaultLock(this.dataDir, () => {
+      const next = mergeConfig(this.config(), patch || {});
+      if (patch.strategy && !STRATEGIES.includes(patch.strategy)) {
+        throw new Error(`unknown strategy "${patch.strategy}" (expected one of ${STRATEGIES.join(', ')})`);
+      }
+      store.writeJSON(this.p.config, next);
+      this._config = next;
+      this._configSig = fileSignature(this.p.config);
+      return next;
+    });
   }
 
   // --------------------------------------------------------------- runtime
@@ -221,14 +223,16 @@ export class MnemonEngine {
 
   writeRuntime({ kind = 'memory', content = '', mode = 'replace' } = {}) {
     if (!['persona', 'user', 'memory'].includes(kind)) throw new Error('kind must be "persona", "user" or "memory"');
-    const file = kind === 'persona' ? this.p.personaMd : kind === 'user' ? this.p.userMd : this.p.memoryMd;
-    const previous = store.readText(file, '');
-    if (previous.trim()) this._revision('runtime', kind, previous);
-    const clean = this.config().redactSecrets ? redactSecrets(String(content).trim()) : String(content).trim();
-    const text = mode === 'append' && previous.trim() ? `${previous.trimEnd()}\n${clean}\n` : `${clean}\n`;
-    store.writeText(file, text);
-    this._afterWrite();
-    return { kind, mode, file, bytes: text.length, path: path.relative(this.dataDir, file) };
+    return store.withVaultLock(this.dataDir, () => {
+      const file = kind === 'persona' ? this.p.personaMd : kind === 'user' ? this.p.userMd : this.p.memoryMd;
+      const previous = store.readText(file, '');
+      if (previous.trim()) this._revision('runtime', kind, previous);
+      const clean = this.config().redactSecrets ? redactSecrets(String(content).trim()) : String(content).trim();
+      const text = mode === 'append' && previous.trim() ? `${previous.trimEnd()}\n${clean}\n` : `${clean}\n`;
+      store.writeText(file, text);
+      this._afterWrite();
+      return { kind, mode, file, bytes: text.length, path: path.relative(this.dataDir, file) };
+    });
   }
 
   _revision(kind, id, content) {
@@ -243,11 +247,13 @@ export class MnemonEngine {
 
   /** Restore a runtime volume exactly as backed up (no trim, no rewrite). */
   _restoreRuntime(kind, content) {
-    const file = kind === 'persona' ? this.p.personaMd : kind === 'user' ? this.p.userMd : this.p.memoryMd;
-    const previous = store.readText(file, '');
-    if (previous.trim()) this._revision('runtime', kind, previous);
-    store.writeText(file, String(content ?? ''));
-    return { kind, bytes: String(content ?? '').length, path: path.relative(this.dataDir, file) };
+    return store.withVaultLock(this.dataDir, () => {
+      const file = kind === 'persona' ? this.p.personaMd : kind === 'user' ? this.p.userMd : this.p.memoryMd;
+      const previous = store.readText(file, '');
+      if (previous.trim()) this._revision('runtime', kind, previous);
+      store.writeText(file, String(content ?? ''));
+      return { kind, bytes: String(content ?? '').length, path: path.relative(this.dataDir, file) };
+    });
   }
 
   // ---------------------------------------------------------------- spaces
@@ -270,12 +276,14 @@ export class MnemonEngine {
   }
 
   createSpace(name, { description = '' } = {}) {
-    const clean = this.ensureSpace(name);
-    const meta = path.join(this.p.spacesDir, clean, 'meta.json');
-    const current = store.readJSON(meta, { name: clean, createdAt: store.nowISO() });
-    store.writeJSON(meta, { ...current, description: description || current.description || '' });
-    this._afterWrite();
-    return { space: clean, description: description || current.description || '' };
+    return store.withVaultLock(this.dataDir, () => {
+      const clean = this.ensureSpace(name);
+      const meta = path.join(this.p.spacesDir, clean, 'meta.json');
+      const current = store.readJSON(meta, { name: clean, createdAt: store.nowISO() });
+      store.writeJSON(meta, { ...current, description: description || current.description || '' });
+      this._afterWrite();
+      return { space: clean, description: description || current.description || '' };
+    });
   }
 
   listSpaces() {
@@ -289,7 +297,8 @@ export class MnemonEngine {
 
   _activeSpaces() {
     const cfg = this.config();
-    if (cfg.enhancements && cfg.enhancements.scopedSources && Array.isArray(cfg.spaces) && cfg.spaces.length) {
+    const scoped = cfg.strategy === 'scoped' || (cfg.enhancements && cfg.enhancements.scopedSources);
+    if (scoped && Array.isArray(cfg.spaces) && cfg.spaces.length) {
       return cfg.spaces.map((s) => this.ensureSpace(s));
     }
     return this.spaceNames();
@@ -397,89 +406,92 @@ export class MnemonEngine {
   saveMemory({ text, space = 'default', tags = [], entities = [], source = 'manual', kind = 'fact', pinned = false } = {}) {
     let value = String(text || '').trim();
     if (!value) throw new Error('text is required');
-    if (this.config().redactSecrets) value = redactSecrets(value);
-    const clean = this.ensureSpace(space);
-    const hash = normalizeText(value);
+    return store.withVaultLock(this.dataDir, () => {
+      if (this.config().redactSecrets) value = redactSecrets(value);
+      const clean = this.ensureSpace(space);
+      const hash = normalizeText(value);
 
-    // exact duplicate anywhere: report it instead of storing it twice
-    for (const existing of this._allMemories({ includeDeleted: true })) {
-      if (existing.deletedAt) continue;
-      if (existing.hash === hash) {
-        let pinnedNow = !!existing.pinned;
-        if (pinned && !existing.pinned) {
-          const found = this._locate(existing.id);
-          if (found) {
-            found.record.pinned = true;
-            found.record.updatedAt = store.nowISO();
-            this._flushSpace(found.space);
-            pinnedNow = true;
+      // exact duplicate anywhere: report it instead of storing it twice
+      for (const existing of this._allMemories({ includeDeleted: true })) {
+        if (existing.deletedAt) continue;
+        if (existing.hash === hash) {
+          let pinnedNow = !!existing.pinned;
+          if (pinned && !existing.pinned) {
+            const found = this._locate(existing.id);
+            if (found) {
+              found.record.pinned = true;
+              found.record.updatedAt = store.nowISO();
+              this._flushSpace(found.space);
+              pinnedNow = true;
+            }
           }
+          return { action: 'duplicate', id: existing.id, space: existing.space, text: existing.text, pinned: pinnedNow, note: 'identical memory already stored' };
         }
-        return { action: 'duplicate', id: existing.id, space: existing.space, text: existing.text, pinned: pinnedNow, note: 'identical memory already stored' };
       }
-    }
 
-    const list = this._loadSpace(clean);
-    const valueTokens = tokens(value);
-    const valueNumbers = extractNumbers(value);
-    const threshold = Number(this.config().autoMergeThreshold) || 0.82;
-    let best = null;
-    let bestScore = 0;
-    for (const m of list) {
-      if (m.deletedAt) continue;
-      const { jaccard: jac, containment } = overlap(valueTokens, tokens(m.text));
-      const existingNumbers = extractNumbers(m.text);
-      const numbersDiffer = valueNumbers.length > 0 && existingNumbers.length > 0 && valueNumbers.join(',') !== existingNumbers.join(',');
-      const negationsDiffer = hasNegation(value) !== hasNegation(m.text);
-      if (numbersDiffer || negationsDiffer) continue;
-      const similar = jac >= threshold || containment >= 0.92;
-      const rank = Math.max(jac, containment * 0.95);
-      if (similar && rank > bestScore) {
-        bestScore = rank;
-        best = m;
+      const list = this._loadSpace(clean);
+      const valueTokens = tokens(value);
+      const valueNumbers = extractNumbers(value);
+      const threshold = Number(this.config().autoMergeThreshold) || 0.85;
+      let best = null;
+      let bestScore = 0;
+      for (const m of list) {
+        if (m.deletedAt) continue;
+        const { jaccard: jac, containment } = overlap(valueTokens, tokens(m.text));
+        const existingNumbers = extractNumbers(m.text);
+        const numbersDiffer = valueNumbers.length > 0 && existingNumbers.length > 0 && valueNumbers.join(',') !== existingNumbers.join(',');
+        const negationsDiffer = hasNegation(value) !== hasNegation(m.text);
+        if (numbersDiffer || negationsDiffer) continue;
+        // Require symmetric overlap alongside containment so short lines don't swallow unrelated long notes.
+        const similar = jac >= threshold || (containment >= 0.92 && jac >= 0.45);
+        const rank = Math.max(jac, containment * 0.95);
+        if (similar && rank > bestScore) {
+          bestScore = rank;
+          best = m;
+        }
       }
-    }
 
-    if (best) {
-      const merged = mergeText(best.text, value);
-      best.text = merged;
-      best.hash = normalizeText(merged);
-      best.updatedAt = store.nowISO();
-      best.tags = uniq([...(best.tags || []), ...tags]);
-      best.entities = uniq([...(best.entities || []), ...entities]);
-      if (pinned) best.pinned = true;
-      best.mergedFrom = [...(best.mergedFrom || []), { text: value, at: store.nowISO(), similarity: Number(bestScore.toFixed(3)) }];
+      if (best) {
+        const merged = mergeText(best.text, value);
+        best.text = merged;
+        best.hash = normalizeText(merged);
+        best.updatedAt = store.nowISO();
+        best.tags = uniq([...(best.tags || []), ...tags]);
+        best.entities = uniq([...(best.entities || []), ...entities]);
+        if (pinned) best.pinned = true;
+        best.mergedFrom = [...(best.mergedFrom || []), { text: value, at: store.nowISO(), similarity: Number(bestScore.toFixed(3)) }];
+        this._flushSpace(clean);
+        return { action: 'merged', id: best.id, space: clean, text: best.text, similarity: Number(bestScore.toFixed(3)), pinned: !!best.pinned };
+      }
+
+      const record = {
+        id: store.uid('mem'),
+        kind,
+        text: value,
+        space: clean,
+        tags: uniq(tags),
+        entities: uniq(entities),
+        source,
+        hash,
+        pinned: !!pinned,
+        createdAt: store.nowISO(),
+        updatedAt: store.nowISO(),
+        accessedAt: null,
+        accessCount: 0,
+        deletedAt: null,
+        mergedFrom: [],
+      };
+      list.push(record);
       this._flushSpace(clean);
-      return { action: 'merged', id: best.id, space: clean, text: best.text, similarity: Number(bestScore.toFixed(3)), pinned: !!best.pinned };
-    }
-
-    const record = {
-      id: store.uid('mem'),
-      kind,
-      text: value,
-      space: clean,
-      tags: uniq(tags),
-      entities: uniq(entities),
-      source,
-      hash,
-      pinned: !!pinned,
-      createdAt: store.nowISO(),
-      updatedAt: store.nowISO(),
-      accessedAt: null,
-      accessCount: 0,
-      deletedAt: null,
-      mergedFrom: [],
-    };
-    list.push(record);
-    this._flushSpace(clean);
-    return {
-      action: 'added',
-      id: record.id,
-      space: clean,
-      text: record.text,
-      pinned: record.pinned,
-      path: path.join('spaces', clean, 'memories.jsonl'),
-    };
+      return {
+        action: 'added',
+        id: record.id,
+        space: clean,
+        text: record.text,
+        pinned: record.pinned,
+        path: path.join('spaces', clean, 'memories.jsonl'),
+      };
+    });
   }
 
   searchMemories(query, { space = null, limit = 8, minScore = 0.01, touch = true } = {}) {
@@ -511,16 +523,18 @@ export class MnemonEngine {
     const hits = scored.filter((m) => m.score > minScore).sort((a, b) => b.score - a.score).slice(0, limit);
     // Automatic recall is a read; recording usage would rewrite the space, fsync
     // both drives and re-decode two snapshots on every single tool step.
-    if (touch) {
-      const touched = new Set();
-      for (const hit of hits) {
-        const found = this._locate(hit.id);
-        if (!found) continue;
-        found.record.accessCount = (found.record.accessCount || 0) + 1;
-        found.record.accessedAt = store.nowISO();
-        touched.add(found.space);
-      }
-      for (const name of touched) this._flushSpace(name);
+    if (touch && hits.length) {
+      store.withVaultLock(this.dataDir, () => {
+        const touched = new Set();
+        for (const hit of hits) {
+          const found = this._locate(hit.id);
+          if (!found) continue;
+          found.record.accessCount = (found.record.accessCount || 0) + 1;
+          found.record.accessedAt = store.nowISO();
+          touched.add(found.space);
+        }
+        for (const name of touched) this._flushSpace(name);
+      });
     }
     return hits.map(({ id, space, text, tags, entities, score, updatedAt, accessCount, pinned }) => ({ id, space, text, tags, entities, score, updatedAt, accessCount, pinned: !!pinned }));
   }
@@ -541,44 +555,48 @@ export class MnemonEngine {
   }
 
   updateMemory(id, { text = null, tags = null, entities = null, space = null, pinned = null } = {}) {
-    const found = this._locate(id);
-    if (!found) throw new Error(`memory not found: ${id}`);
-    const record = found.record;
-    const before = record.text;
-    if (text !== null && String(text).trim()) {
-      record.text = this.config().redactSecrets ? redactSecrets(String(text).trim()) : String(text).trim();
-      record.hash = normalizeText(record.text);
-    }
-    if (Array.isArray(tags)) record.tags = uniq(tags);
-    if (Array.isArray(entities)) record.entities = uniq(entities);
-    if (typeof pinned === 'boolean') record.pinned = pinned;
-    record.updatedAt = store.nowISO();
-    if (space && this.ensureSpace(space) !== found.space) {
-      const target = this.ensureSpace(space);
-      found.list.splice(found.index, 1);
-      this._markRemoved(found.space, id);
-      record.space = target;
+    return store.withVaultLock(this.dataDir, () => {
+      const found = this._locate(id);
+      if (!found) throw new Error(`memory not found: ${id}`);
+      const record = found.record;
+      const before = record.text;
+      if (text !== null && String(text).trim()) {
+        record.text = this.config().redactSecrets ? redactSecrets(String(text).trim()) : String(text).trim();
+        record.hash = normalizeText(record.text);
+      }
+      if (Array.isArray(tags)) record.tags = uniq(tags);
+      if (Array.isArray(entities)) record.entities = uniq(entities);
+      if (typeof pinned === 'boolean') record.pinned = pinned;
+      record.updatedAt = store.nowISO();
+      if (space && this.ensureSpace(space) !== found.space) {
+        const target = this.ensureSpace(space);
+        found.list.splice(found.index, 1);
+        this._markRemoved(found.space, id);
+        record.space = target;
+        this._flushSpace(found.space);
+        this._loadSpace(target).push(record);
+        this._flushSpace(target);
+        return { action: 'moved', id, from: found.space, to: target, text: record.text, previousText: before };
+      }
       this._flushSpace(found.space);
-      this._loadSpace(target).push(record);
-      this._flushSpace(target);
-      return { action: 'moved', id, from: found.space, to: target, text: record.text, previousText: before };
-    }
-    this._flushSpace(found.space);
-    return { action: 'updated', id, space: found.space, text: record.text, previousText: before };
+      return { action: 'updated', id, space: found.space, text: record.text, previousText: before };
+    });
   }
 
   forgetMemory(id, { hard = false } = {}) {
-    const found = this._locate(id);
-    if (!found) throw new Error(`memory not found: ${id}`);
-    if (hard) {
-      const [removed] = found.list.splice(found.index, 1);
-      this._markRemoved(found.space, id);
+    return store.withVaultLock(this.dataDir, () => {
+      const found = this._locate(id);
+      if (!found) throw new Error(`memory not found: ${id}`);
+      if (hard) {
+        const [removed] = found.list.splice(found.index, 1);
+        this._markRemoved(found.space, id);
+        this._flushSpace(found.space);
+        return { action: 'erased', id, space: found.space, text: removed.text };
+      }
+      found.record.deletedAt = store.nowISO();
       this._flushSpace(found.space);
-      return { action: 'erased', id, space: found.space, text: removed.text };
-    }
-    found.record.deletedAt = store.nowISO();
-    this._flushSpace(found.space);
-    return { action: 'forgotten', id, space: found.space, text: found.record.text, note: 'soft delete; restore by clearing deletedAt or re-save the fact' };
+      return { action: 'forgotten', id, space: found.space, text: found.record.text, note: 'soft delete; restore by clearing deletedAt or re-save the fact' };
+    });
   }
 
   // ------------------------------------------------------------- documents
@@ -606,19 +624,21 @@ export class MnemonEngine {
   }
 
   saveDocument({ title, content, tags = [], id = null } = {}) {
-    const docId = store.slugify(id || title, 'doc');
-    const file = path.join(this.p.documentsDir, `${docId}.md`);
-    const previousRaw = store.readText(file, '');
-    const previous = previousRaw ? this._parseFrontmatter(previousRaw) : null;
-    if (previousRaw.trim()) this._revision('document', docId, previousRaw);
-    const now = store.nowISO();
-    const createdAt = (previous && previous.meta.createdAt) || now;
-    const allTags = uniq([...((previous && previous.meta.tags) || []), ...tags]);
-    const body = this.config().redactSecrets ? redactSecrets(String(content || '').trim()) : String(content || '').trim();
-    const front = ['---', `id: ${docId}`, `title: ${JSON.stringify(title || docId)}`, `tags: ${JSON.stringify(allTags)}`, `createdAt: ${createdAt}`, `updatedAt: ${now}`, '---', ''].join('\n');
-    store.writeText(file, `${front}${body}\n`);
-    this._afterWrite();
-    return { action: previousRaw ? 'updated' : 'created', id: docId, title: title || docId, tags: allTags, updatedAt: now, bytes: body.length, path: path.relative(this.dataDir, file) };
+    return store.withVaultLock(this.dataDir, () => {
+      const docId = store.slugify(id || title, 'doc');
+      const file = path.join(this.p.documentsDir, `${docId}.md`);
+      const previousRaw = store.readText(file, '');
+      const previous = previousRaw ? this._parseFrontmatter(previousRaw) : null;
+      if (previousRaw.trim()) this._revision('document', docId, previousRaw);
+      const now = store.nowISO();
+      const createdAt = (previous && previous.meta.createdAt) || now;
+      const allTags = uniq([...((previous && previous.meta.tags) || []), ...tags]);
+      const body = this.config().redactSecrets ? redactSecrets(String(content || '').trim()) : String(content || '').trim();
+      const front = ['---', `id: ${docId}`, `title: ${JSON.stringify(title || docId)}`, `tags: ${JSON.stringify(allTags)}`, `createdAt: ${createdAt}`, `updatedAt: ${now}`, '---', ''].join('\n');
+      store.writeText(file, `${front}${body}\n`);
+      this._afterWrite();
+      return { action: previousRaw ? 'updated' : 'created', id: docId, title: title || docId, tags: allTags, updatedAt: now, bytes: body.length, path: path.relative(this.dataDir, file) };
+    });
   }
 
   listDocuments() {
@@ -650,6 +670,7 @@ export class MnemonEngine {
       const docTokens = new Set(tokens(`${doc.title} ${doc.body}`));
       let hits = 0;
       for (const t of queryTokens) if (docTokens.has(t)) hits += 1;
+      if (hits <= 0) return { ...doc, score: 0 }; // no shared term: never pull unrelated docs via recency decay alone
       const score = Number(((hits / Math.sqrt(queryTokens.length)) + (doc.updatedAt ? 0.2 * Math.exp(-daysSince(doc.updatedAt) / 180) : 0)).toFixed(4));
       return { ...doc, score };
     });
@@ -674,14 +695,16 @@ export class MnemonEngine {
   }
 
   archiveDocument(id) {
-    const docId = store.slugify(id, 'doc');
-    const file = path.join(this.p.documentsDir, `${docId}.md`);
-    if (!store.exists(file)) throw new Error(`document not found: ${id}`);
-    const target = path.join(this.p.docArchive, `${docId}.md`);
-    store.writeText(target, store.readText(file, ''));
-    store.removeFile(file);
-    this._afterWrite();
-    return { action: 'archived', id: docId, path: path.relative(this.dataDir, target) };
+    return store.withVaultLock(this.dataDir, () => {
+      const docId = store.slugify(id, 'doc');
+      const file = path.join(this.p.documentsDir, `${docId}.md`);
+      if (!store.exists(file)) throw new Error(`document not found: ${id}`);
+      const target = path.join(this.p.docArchive, `${docId}.md`);
+      store.writeText(target, store.readText(file, ''));
+      store.removeFile(file);
+      this._afterWrite();
+      return { action: 'archived', id: docId, path: path.relative(this.dataDir, target) };
+    });
   }
 
   // ------------------------------------------------------------ candidates
@@ -689,22 +712,24 @@ export class MnemonEngine {
   addCandidate({ text, reason = '', source = 'manual', sessionId = null } = {}) {
     const value = String(text || '').trim();
     if (!value) throw new Error('text is required');
-    const hash = normalizeText(value);
-    const list = store.readJSONL(this.p.candidatesFile);
-    const existing = list.find((c) => c.status === 'pending' && c.hash === hash);
-    if (existing) return { action: 'duplicate', id: existing.id, text: existing.text };
-    const record = {
-      id: store.uid('cand'),
-      text: this.config().redactSecrets ? redactSecrets(value) : value,
-      reason,
-      source,
-      sessionId,
-      hash,
-      createdAt: store.nowISO(),
-      status: 'pending',
-    };
-    store.appendJSONL(this.p.candidatesFile, record);
-    return { action: 'queued', id: record.id, text: record.text, reason };
+    return store.withVaultLock(this.dataDir, () => {
+      const hash = normalizeText(value);
+      const list = store.readJSONL(this.p.candidatesFile);
+      const existing = list.find((c) => c.status === 'pending' && c.hash === hash);
+      if (existing) return { action: 'duplicate', id: existing.id, text: existing.text };
+      const record = {
+        id: store.uid('cand'),
+        text: this.config().redactSecrets ? redactSecrets(value) : value,
+        reason,
+        source,
+        sessionId,
+        hash,
+        createdAt: store.nowISO(),
+        status: 'pending',
+      };
+      store.appendJSONL(this.p.candidatesFile, record);
+      return { action: 'queued', id: record.id, text: record.text, reason };
+    });
   }
 
   listCandidates({ status = 'pending', limit = 50 } = {}) {
@@ -714,31 +739,35 @@ export class MnemonEngine {
   }
 
   resolveCandidate(id, { action = 'adopt', space = 'default', text = null } = {}) {
-    const list = store.readJSONL(this.p.candidatesFile);
-    const index = list.findIndex((c) => c.id === id);
-    if (index === -1) throw new Error(`candidate not found: ${id}`);
-    const candidate = list[index];
-    if (!['adopt', 'reject'].includes(action)) throw new Error('action must be "adopt" or "reject"');
-    if (action === 'reject') {
-      list[index] = { ...candidate, status: 'rejected', resolvedAt: store.nowISO() };
+    return store.withVaultLock(this.dataDir, () => {
+      const list = store.readJSONL(this.p.candidatesFile);
+      const index = list.findIndex((c) => c.id === id);
+      if (index === -1) throw new Error(`candidate not found: ${id}`);
+      const candidate = list[index];
+      if (!['adopt', 'reject'].includes(action)) throw new Error('action must be "adopt" or "reject"');
+      if (action === 'reject') {
+        list[index] = { ...candidate, status: 'rejected', resolvedAt: store.nowISO() };
+        store.writeJSONL(this.p.candidatesFile, list);
+        return { action: 'rejected', id, text: candidate.text };
+      }
+      const saved = this.saveMemory({ text: text || candidate.text, space, source: 'candidate', tags: candidate.reason ? ['captured'] : [] });
+      list[index] = { ...candidate, status: 'adopted', resolvedAt: store.nowISO(), memoryId: saved.id, space: saved.space };
       store.writeJSONL(this.p.candidatesFile, list);
-      return { action: 'rejected', id, text: candidate.text };
-    }
-    const saved = this.saveMemory({ text: text || candidate.text, space, source: 'candidate', tags: candidate.reason ? ['captured'] : [] });
-    list[index] = { ...candidate, status: 'adopted', resolvedAt: store.nowISO(), memoryId: saved.id, space: saved.space };
-    store.writeJSONL(this.p.candidatesFile, list);
-    return { action: 'adopted', id, memory: saved };
+      return { action: 'adopted', id, memory: saved };
+    });
   }
 
   // -------------------------------------------------------------- receipts
 
   recordReceipt({ session = null, read = [], wrote = [], note = '' } = {}) {
     if (!read.length && !wrote.length && !note) return null;
-    const stamp = store.nowISO();
-    const file = path.join(this.p.receiptsDir, `${stamp.slice(0, 10)}.jsonl`);
-    const record = { ts: stamp, session, read, wrote, note };
-    store.appendJSONL(file, record);
-    return record;
+    return store.withVaultLock(this.dataDir, () => {
+      const stamp = store.nowISO();
+      const file = path.join(this.p.receiptsDir, `${stamp.slice(0, 10)}.jsonl`);
+      const record = { ts: stamp, session, read, wrote, note };
+      store.appendJSONL(file, record);
+      return record;
+    });
   }
 
   recentReceipts({ limit = 10, day = null } = {}) {
@@ -765,10 +794,11 @@ export class MnemonEngine {
     };
   }
 
-  buildTurnContext({ prompt = '', session = null, budget = null } = {}) {
+  buildTurnContext({ prompt = '', session = null, budget = null, deterministic = false } = {}) {
     const cfg = this.config();
+    const isLight = cfg.enhancements.lightContext || cfg.strategy === 'light-context';
     let budgetChars = Number(budget ?? cfg.residentBudgetChars) || 6000;
-    if (cfg.enhancements.lightContext || cfg.strategy === 'light-context') budgetChars = Math.round(budgetChars / 2);
+    if (isLight) budgetChars = Math.round(budgetChars / 2);
 
     const { persona, user, memory } = this.readRuntime();
     // PERSONA.md is the permanent volume: it is never shortened by the budget,
@@ -778,11 +808,32 @@ export class MnemonEngine {
     if (residentBase.length > budgetChars) residentBase = `${truncate(residentBase, budgetChars)}\n…(resident memory truncated to the ${budgetChars}-character budget)`;
     const resident = [personaText, residentBase].filter(Boolean).join('\n\n');
 
-    const relevant = prompt ? this.searchMemories(prompt, { limit: cfg.searchBudget, touch: false }) : [];
-    const documents = prompt ? this.searchDocuments(prompt, { limit: cfg.documentBudget }) : [];
+    let relevant = [];
+    let documents = [];
+    if (prompt) {
+      if (isLight) {
+        // light-context queries memory spaces only within a half-size search cap.
+        const memLimit = Math.max(1, Math.min(Number(cfg.searchBudget) || 8, 4));
+        relevant = this.searchMemories(prompt, { limit: memLimit, touch: false });
+      } else if (cfg.strategy === 'general') {
+        // general lets memories and documents share one ranked slot budget.
+        const poolLimit = Math.max(1, Number(cfg.searchBudget) || 8);
+        const rawMems = this.searchMemories(prompt, { limit: poolLimit, touch: false }).map((m) => ({ kind: 'mem', score: m.score, item: m }));
+        const rawDocs = this.searchDocuments(prompt, { limit: poolLimit }).map((d) => ({ kind: 'doc', score: d.score, item: d }));
+        const combined = [...rawMems, ...rawDocs].sort((a, b) => b.score - a.score).slice(0, poolLimit);
+        relevant = combined.filter((x) => x.kind === 'mem').map((x) => x.item);
+        documents = combined.filter((x) => x.kind === 'doc').map((x) => x.item);
+      } else {
+        relevant = this.searchMemories(prompt, { limit: cfg.searchBudget, touch: false });
+        documents = this.searchDocuments(prompt, { limit: cfg.documentBudget });
+      }
+    }
+
     const pinned = this._allMemories()
       .filter((m) => m.pinned)
-      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+      .sort((a, b) => (deterministic
+        ? String(a.createdAt || a.id).localeCompare(String(b.createdAt || b.id)) || String(a.id).localeCompare(String(b.id))
+        : String(b.updatedAt).localeCompare(String(a.updatedAt))))
       .slice(0, 30)
       .map(({ id, space, text, updatedAt }) => ({ id, space, text, updatedAt }));
     const receipts = { read: [...relevant.map((r) => r.id), ...documents.map((d) => d.id)], wrote: [] };
@@ -791,7 +842,7 @@ export class MnemonEngine {
     return { strategy: cfg.strategy, enhancements: cfg.enhancements, budgetChars, resident, persona: personaText, residentBase, pinned, relevant, documents, receipts, counts: this.counts() };
   }
 
-  formatContextBlock(context, { header = 'mnemon-memory', includeUsage = true } = {}) {
+  formatContextBlock(context, { header = 'mnemon-memory', includeUsage = true, deterministic = false } = {}) {
     const lines = [`<${header} strategy="${context.strategy}" budget="${context.budgetChars}">`];
     if (context.persona) {
       lines.push('## Persona (PERSONA.md · permanent, never truncated)');
@@ -809,22 +860,31 @@ export class MnemonEngine {
     }
     if (context.relevant && context.relevant.length) {
       lines.push('## Relevant memory recalled for this turn');
-      for (const m of context.relevant) lines.push(`- [${m.id}] (${m.space}, score ${m.score}${m.pinned ? ', pinned' : ''}) ${oneLine(m.text, 300)}`);
+      for (const m of context.relevant) {
+        const meta = deterministic
+          ? `${m.space}${m.pinned ? ', pinned' : ''}`
+          : `${m.space}, score ${m.score}${m.pinned ? ', pinned' : ''}`;
+        lines.push(`- [${m.id}] (${meta}) ${oneLine(m.text, 300)}`);
+      }
     }
     if (context.documents && context.documents.length) {
       lines.push('## Project documents (read on demand)');
-      for (const d of context.documents) lines.push(`- ${d.id} — ${oneLine(d.title, 90)} — ${oneLine(d.snippet, 140)} — read with mnemon_memory_document_read`);
+      for (const d of context.documents) lines.push(`- ${d.id} — ${oneLine(d.title, 90)} — ${oneLine(d.snippet, 140)} — read with memory_doc`);
     }
     if (includeUsage) {
       lines.push('## How to use this memory');
-      lines.push('- Recall more: mnemon_memory_search · Recall a whole turn: mnemon_memory_context');
-      lines.push('- Save a fact: mnemon_memory_save (deduplicates and reports where it went)');
+      lines.push('- Recall on demand: memory_recall (search/list/get) · Documents: memory_doc (search/read/write)');
+      lines.push('- Save a fact: memory_save (deduplicates and reports where it went)');
       lines.push('- Slash commands: /mnemon · /mnemon-remember · /mnemon-review · /mnemon-' + 'system' + ' · /mnemon-evolve');
       lines.push('- Remembered history never outranks the current instructions or the workspace files.');
     }
     if (context.counts) {
       const c = context.counts;
-      lines.push(`## Status: ${c.memories} memories · ${c.spaces} spaces · ${c.documents} documents · ${c.pendingCandidates} candidates awaiting review`);
+      if (deterministic) {
+        lines.push(`## Status: ${c.memories} memories · ${c.spaces} spaces · ${c.documents} documents`);
+      } else {
+        lines.push(`## Status: ${c.memories} memories · ${c.spaces} spaces · ${c.documents} documents · ${c.pendingCandidates} candidates awaiting review`);
+      }
     }
     lines.push(`</${header}>`);
     return lines.join('\n');
@@ -928,7 +988,19 @@ export class MnemonEngine {
       store.writeText(path.join(dir, 'runtime', 'USER.md'), `${pack.runtime.user || ''}`);
       store.writeText(path.join(dir, 'runtime', 'MEMORY.md'), `${pack.runtime.memory || ''}`);
       for (const [name, list] of Object.entries(pack.spaces)) store.writeJSONL(path.join(dir, 'spaces', name, 'memories.jsonl'), list);
-      for (const doc of pack.documents) store.writeText(path.join(dir, 'documents', `${doc.id}.md`), `# ${doc.title}\n\n${doc.content}\n`);
+      for (const doc of pack.documents) {
+        const front = [
+          '---',
+          `id: ${doc.id}`,
+          `title: ${JSON.stringify(doc.title || doc.id)}`,
+          `tags: ${JSON.stringify(doc.tags || [])}`,
+          ...(doc.createdAt ? [`createdAt: ${doc.createdAt}`] : []),
+          ...(doc.updatedAt ? [`updatedAt: ${doc.updatedAt}`] : []),
+          '---',
+          '',
+        ].join('\n');
+        store.writeText(path.join(dir, 'documents', `${doc.id}.md`), `${front}${doc.content}\n`);
+      }
       return { mode: 'dir', target: dir, memories: Object.values(pack.spaces).reduce((n, l) => n + l.length, 0), documents: pack.documents.length };
     }
     const file = path.resolve(target || path.join(this.p.backupsDir, `mnemon-backup-${stamp}.json.gz`));
@@ -997,39 +1069,41 @@ export class MnemonEngine {
     const pack = JSON.parse(json);
     if (pack.format !== 'mnemon-pack') throw new Error('not a mnemon pack');
     const summary = { mode, added: 0, merged: 0, duplicate: 0, documents: 0 };
-    this._writing = true;
-    try {
-      if (mode === 'replace') {
-        this._restoreRuntime('persona', pack.runtime?.persona ?? '');
-        this._restoreRuntime('user', pack.runtime?.user ?? '');
-        this._restoreRuntime('memory', pack.runtime?.memory ?? '');
-      } else if (pack.runtime) {
-        const current = this.readRuntime();
-        if (this._isBlankRuntime(current.persona) && pack.runtime.persona) this.writeRuntime({ kind: 'persona', content: pack.runtime.persona });
-        if (this._isBlankRuntime(current.user) && pack.runtime.user) this.writeRuntime({ kind: 'user', content: pack.runtime.user });
-        if (this._isBlankRuntime(current.memory) && pack.runtime.memory) this.writeRuntime({ kind: 'memory', content: pack.runtime.memory });
-      }
-      for (const [space, list] of Object.entries(pack.spaces || {})) {
-        this.ensureSpace(space);
+    store.withVaultLock(this.dataDir, () => {
+      this._writing = true;
+      try {
         if (mode === 'replace') {
-          this._spaces.set(space, []);
-          this._spaceDisk.set(space, new Map());
-          store.writeJSONL(path.join(this.p.spacesDir, space, 'memories.jsonl'), []);
-          this._spaceSig.set(space, fileSignature(path.join(this.p.spacesDir, space, 'memories.jsonl')));
+          this._restoreRuntime('persona', pack.runtime?.persona ?? '');
+          this._restoreRuntime('user', pack.runtime?.user ?? '');
+          this._restoreRuntime('memory', pack.runtime?.memory ?? '');
+        } else if (pack.runtime) {
+          const current = this.readRuntime();
+          if (this._isBlankRuntime(current.persona) && pack.runtime.persona) this.writeRuntime({ kind: 'persona', content: pack.runtime.persona });
+          if (this._isBlankRuntime(current.user) && pack.runtime.user) this.writeRuntime({ kind: 'user', content: pack.runtime.user });
+          if (this._isBlankRuntime(current.memory) && pack.runtime.memory) this.writeRuntime({ kind: 'memory', content: pack.runtime.memory });
         }
-        for (const m of list) {
-          const result = this.saveMemory({ text: m.text, space, tags: m.tags || [], entities: m.entities || [], source: 'import', pinned: !!m.pinned });
-          if (summary[result.action] !== undefined) summary[result.action] += 1;
+        for (const [space, list] of Object.entries(pack.spaces || {})) {
+          this.ensureSpace(space);
+          if (mode === 'replace') {
+            this._spaces.set(space, []);
+            this._spaceDisk.set(space, new Map());
+            store.writeJSONL(path.join(this.p.spacesDir, space, 'memories.jsonl'), []);
+            this._spaceSig.set(space, fileSignature(path.join(this.p.spacesDir, space, 'memories.jsonl')));
+          }
+          for (const m of list) {
+            const result = this.saveMemory({ text: m.text, space, tags: m.tags || [], entities: m.entities || [], source: 'import', pinned: !!m.pinned });
+            if (summary[result.action] !== undefined) summary[result.action] += 1;
+          }
         }
+        for (const doc of pack.documents || []) {
+          this.saveDocument({ id: doc.id, title: doc.title, content: doc.content, tags: doc.tags || [] });
+          summary.documents += 1;
+        }
+      } finally {
+        this._writing = false;
       }
-      for (const doc of pack.documents || []) {
-        this.saveDocument({ id: doc.id, title: doc.title, content: doc.content, tags: doc.tags || [] });
-        summary.documents += 1;
-      }
-    } finally {
-      this._writing = false;
-    }
-    this._afterWrite();
+      this._afterWrite();
+    });
     return summary;
   }
 

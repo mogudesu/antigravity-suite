@@ -133,9 +133,13 @@
       const timer = window.setTimeout(() => controller.abort(), 12000);
       try {
         const request = Object.assign({ cache: 'no-store', signal: controller.signal }, options || {});
-        if (request.body) {
-          request.headers = Object.assign({ 'Content-Type': 'application/json' }, request.headers || {});
-        }
+        const token = window.__AG_STARLIGHT_TOKEN__;
+        const hdrs = Object.assign(
+          request.body ? { 'Content-Type': 'application/json' } : {},
+          request.headers || {},
+          token ? { 'X-Starlight-Token': token } : {}
+        );
+        if (Object.keys(hdrs).length) request.headers = hdrs;
         const response = await fetch(SIDECAR + path, request);
         if (!response.ok) throw new Error('HTTP ' + response.status);
         return await response.json();

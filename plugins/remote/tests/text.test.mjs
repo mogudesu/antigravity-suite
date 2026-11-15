@@ -44,6 +44,40 @@ test('Dedupe 只放行一次', () => {
   assert.equal(dedupe.check(''), true); // 空 id 不拦
 });
 
+test('Dedupe 支持持久化恢复、onChange 回调与 0/数字 id', () => {
+  const snapshots = [];
+  const d1 = new Dedupe({
+    limit: 3,
+    initial: [{ id: 'm-old', at: 1000 }],
+    onChange: (entries) => snapshots.push(entries),
+  });
+
+  assert.equal(d1.check('m-old'), false); // 启动恢复的 id 不放行
+  assert.equal(d1.check(0), true); // 数字 0 规范化为 '0' 放行一次
+  assert.equal(d1.check('0'), false); // 同一 id 再次拦截
+  assert.equal(d1.check(null), true); // null/undefined/'' 不拦截且不触发写入
+  assert.equal(d1.check(undefined), true);
+  assert.equal(d1.check(''), true);
+  assert.equal(snapshots.length, 1);
+  assert.deepEqual(
+    d1.export().map((e) => e.id),
+    ['m-old', '0'],
+  );
+
+  // 超过 limit=3 时淘汰最老条目
+  assert.equal(d1.check('m2'), true);
+  assert.equal(d1.check('m3'), true);
+  assert.deepEqual(
+    d1.export().map((e) => e.id),
+    ['0', 'm2', 'm3'],
+  );
+
+  // 传字符串数组也兼容恢复，重启后拦截已见消息
+  const d2 = new Dedupe({ limit: 3, initial: d1.export() });
+  assert.equal(d2.check('m2'), false);
+  assert.equal(d2.check('m-old'), true);
+});
+
 test('mentionsBot 判定', () => {
   assert.equal(mentionsBot([{ type: 'at', data: { qq: '1' } }], '1'), true);
   assert.equal(mentionsBot([{ type: 'text', data: { text: 'hi' } }], '1', ''), false);

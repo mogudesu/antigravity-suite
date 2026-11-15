@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "Optional release notes"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -17,8 +23,9 @@ jobs:
         with:
           node-version: "22"
       - name: Build zip and latest.json
-        run: node scripts/release.js --repo ${{ github.repository }} --notes "Release ${{ github.ref_name }}" --out dist
+        run: node scripts/release.js --repo "${{ github.repository }}" --notes "${{ github.event.inputs.notes || format('Release {0}', github.ref_name) }}" --out dist
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |

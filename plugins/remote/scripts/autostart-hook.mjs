@@ -42,35 +42,45 @@ function startHub() {
   return child.pid;
 }
 
+function writeHookJson() {
+  try {
+    process.stdout.write('{}\n');
+  } catch {
+    /* stdout 已关闭 */
+  }
+}
+
 async function main() {
   const port = readDevToolsPort();
   if (!port) {
     console.error('[antigravity-remote-mogu] 没读到 DevToolsActivePort：Antigravity 可能还没启动完成');
   }
-  if (!(await hubAlive())) {
+  const alreadyAlive = await hubAlive();
+  if (!alreadyAlive) {
     const pid = startHub();
-    console.log(`[antigravity-remote-mogu] 守护进程已拉起（pid=${pid}）`);
+    console.error(`[antigravity-remote-mogu] 守护进程已拉起（pid=${pid}）`);
     // 给进程一点时间起 HTTP
     for (let i = 0; i < 12; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 250));
       if (await hubAlive()) break;
     }
+    // 仅首次启动时触发一次幂等注入，后续复用守护进程与页面常驻注入器
+    try {
+      const { SettingsInjector } = await import('../src/ui/settings-injector.mjs');
+      const injector = new SettingsInjector({ panelUrl: `http://127.0.0.1:${PORT}/ui/panel.html` });
+      const result = await injector.ensure();
+      console.error('[antigravity-remote-mogu] 设置页注入：', JSON.stringify(result));
+    } catch (error) {
+      console.error('[antigravity-remote-mogu] 设置页注入失败：', error?.message || error);
+    }
   } else {
-    console.log('[antigravity-remote-mogu] 守护进程已在运行');
+    console.error('[antigravity-remote-mogu] 守护进程已在运行，直接复用（跳过重复注入）');
   }
-
-  // 注入设置页（失败不影响会话）
-  try {
-    const { SettingsInjector } = await import('../src/ui/settings-injector.mjs');
-    const injector = new SettingsInjector({ panelUrl: `http://127.0.0.1:${PORT}/ui/panel.html` });
-    const result = await injector.ensure();
-    console.log('[antigravity-remote-mogu] 设置页注入：', JSON.stringify(result));
-  } catch (error) {
-    console.error('[antigravity-remote-mogu] 设置页注入失败：', error?.message || error);
-  }
+  writeHookJson();
 }
 
 main().catch((error) => {
   console.error('[antigravity-remote-mogu] 钩子异常：', error?.message || error);
+  writeHookJson();
   process.exit(0); // 钩子失败不能挡住会话
 });

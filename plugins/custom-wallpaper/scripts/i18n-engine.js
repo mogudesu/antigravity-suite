@@ -33,6 +33,7 @@
 
   var CONFIG = (window.__AG_CONFIG__ && typeof window.__AG_CONFIG__ === 'object') ? window.__AG_CONFIG__ : {};
   var ALERTS_ENABLED = CONFIG.translateAlerts !== false;
+  var DEEP_I18N_ENABLED = CONFIG.deepI18n !== false;
 
   // ---------------------------------------------------------------------------
   // 1. Dictionary (EN -> ZH). Built from the legacy translate.js corpus plus the
@@ -1427,11 +1428,51 @@
     };
   }
 
+  function restoreAlertTitles(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    var titles = scope.querySelectorAll('.markdown-alert-title');
+    for (var i = 0; i < titles.length; i += 1) {
+      var walker = document.createTreeWalker(titles[i], NodeFilter.SHOW_TEXT, null);
+      var n;
+      while ((n = walker.nextNode())) restoreTextNode(n);
+    }
+  }
+
+  function applyConfig(patch) {
+    if (!patch || typeof patch !== 'object') return stats();
+    if (typeof patch.language === 'string') {
+      var normalized = normalizeLang(patch.language);
+      if (normalized) state.lang = normalized;
+    }
+    if (typeof patch.translateAlerts === 'boolean') {
+      ALERTS_ENABLED = patch.translateAlerts;
+      if (!ALERTS_ENABLED) {
+        restoreAlertTitles(document.body);
+      } else if (state.running && state.lang === 'zh-CN' && document.body) {
+        translateAlertTitles(document.body);
+      }
+    }
+    if (typeof patch.deepI18n === 'boolean') {
+      DEEP_I18N_ENABLED = patch.deepI18n;
+      if (!DEEP_I18N_ENABLED) {
+        stop();
+        return stats();
+      }
+      if (!state.running) start();
+    }
+    if (state.running && DEEP_I18N_ENABLED) {
+      if (state.lang === 'en') restoreAll();
+      else if (document.body) apply(document.body);
+    }
+    return stats();
+  }
+
   var api = {
     version: VERSION,
     setLanguage: setLanguage,
     getLanguage: function () { return state.lang; },
     apply: apply,
+    applyConfig: applyConfig,
     start: start,
     stop: stop,
     stats: stats,
@@ -1442,19 +1483,28 @@
   window.__agI18n = api;
   window.__agSetLanguage = setLanguage;
 
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('ag-config-updated', function (event) {
+      applyConfig(event && event.detail);
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // 11. Boot
   // ---------------------------------------------------------------------------
   try {
-    state.running = true;
-    if (document.body) {
-      startObserver();
-      if (state.lang === 'zh-CN') translateTree(document.body);
-    } else {
-      document.addEventListener('DOMContentLoaded', function () {
+    if (DEEP_I18N_ENABLED) {
+      state.running = true;
+      if (document.body) {
         startObserver();
         if (state.lang === 'zh-CN') translateTree(document.body);
-      }, { once: true });
+      } else {
+        document.addEventListener('DOMContentLoaded', function () {
+          if (!DEEP_I18N_ENABLED) return;
+          startObserver();
+          if (state.lang === 'zh-CN') translateTree(document.body);
+        }, { once: true });
+      }
     }
   } catch (error) {
     // Never break the host app because of i18n boot.

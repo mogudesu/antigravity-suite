@@ -28,17 +28,17 @@ One fact, one sentence, self-contained. Resolve pronouns: write "the deployment 
 
 ## 3. Search before saving
 
-For each candidate run `mnemon_memory_search` with its key terms. If an existing memory already says it, do not save it again — the same fact in two places is how a memory store starts lying.
+For each candidate run `memory_recall` (`action: "search"`) with its key terms. If an existing memory already says it, do not save it again — the same fact in two places is how a memory store starts lying.
 
 ## 4. Save, and let the deduplication decide
 
-Call `mnemon_memory_save` for each fact. It answers:
+Call `memory_save` (`action: "remember"`) for each fact. It answers:
 
 - `added` — new fact stored.
 - `merged` — near-identical to an existing memory; the wording was merged, no duplicate was created.
 - `duplicate` — already stored; nothing was written.
 
-For a stable preference about the user, prefer `mnemon_memory_runtime_write` with `kind: "user"` so it is resident every turn. For a fact that only the next turn needs, use `kind: "memory"`.
+For a stable preference about the user, prefer `memory_profile` with `action: "set_user"` so it is resident from SessionStart. For a fact that only the next turn needs, use `action: "set_memory"` (or `memory_save` with `action: "journal"`).
 
 ## 5. Report the receipt
 
@@ -54,8 +54,8 @@ Already known: "Prefers Conventional Commits" — nothing written
 
 Do not overwrite silently. Show the user both wordings and propose one of:
 
-1. `mnemon_memory_update` — the new statement replaces the old one.
-2. `mnemon_memory_forget` — the old fact is retired (soft delete, recoverable).
+1. `memory_manage` (`action: "update"`) — the new statement replaces the old one.
+2. `memory_manage` (`action: "forget"`) — the old fact is retired (soft delete, recoverable).
 3. Both kept — only when they are true of different scopes, such as two projects.
 
-Apply only what the user picks, then re-run `mnemon_memory_audit` to confirm no contradiction is left.
+Apply only what the user picks, then re-run `memory_admin` (`action: "audit"`) to confirm no contradiction is left.

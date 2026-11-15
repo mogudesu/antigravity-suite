@@ -56,7 +56,7 @@
     let offset = 0;
     let last = null;
     while (offset + 5 <= buffer.length) {
-      const length = (buffer[offset + 1] << 24) | (buffer[offset + 2] << 16) | (buffer[offset + 3] << 8) | buffer[offset + 4];
+      const length = new DataView(buffer.buffer, buffer.byteOffset + offset + 1, 4).getUint32(0, false);
       const start = offset + 5;
       const end = start + length;
       offset = end;
@@ -152,7 +152,7 @@
     const json = JSON.stringify({ excludeSubtrajectories: true });
     const body = new TextEncoder().encode(json);
     const frame = new Uint8Array(5 + body.length);
-    frame[4] = body.length;
+    new DataView(frame.buffer).setUint32(1, body.length, false);
     frame.set(body, 5);
     const response = await fetch("/exa.language_server_pb.LanguageServerService/GetAllCascadeTrajectories", {
       method: "POST",
@@ -643,7 +643,7 @@
       closePopover();
       render();
     }, { passive: true });
-    state.timer = window.setInterval(() => {
+    const radarTick = () => {
       if (document.visibilityState === "hidden") return;
       if (location.pathname !== state.lastPath) {
         state.lastPath = location.pathname;
@@ -652,7 +652,17 @@
         return;
       }
       if (Date.now() - state.lastFetch > 2400) refresh();
-    }, 500);
+    };
+    const bus = window.__agStarlightBus;
+    state.timer = bus ? bus.onTick("running-radar", 500, radarTick) : window.setInterval(radarTick, 500);
+    window.__agRunningRadarDispose = () => {
+      if (bus && typeof state.timer === "function") state.timer();
+      else window.clearInterval(state.timer);
+      document.getElementById(HOST_ID)?.remove();
+      document.getElementById(POPOVER_ID)?.remove();
+      document.getElementById(STYLE_ID)?.remove();
+      delete window.__agRunningRadarInstalled;
+    };
     refresh();
   }
 

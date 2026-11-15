@@ -11,12 +11,14 @@
  *     把所有工具调用 POST /rpc 中继给 Leader；Leader 消失后下次调用自动尝试接管端口。
  */
 
+const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const os = require("os");
 const path = require("path");
 const readline = require("readline");
 const { Bridge, BridgeError, MARKER } = require("./bridge");
+const { IsolatedEngine } = require("./isolated-engine");
 const { TOOLS, findTool, timeoutFor } = require("./tools");
 const { runBrowserLaunch } = require("./launch");
 const {
@@ -28,27 +30,40 @@ const {
 } = require("./recordings");
 
 const SERVER_NAME = "antigravity-browser-bridge";
-const SERVER_VERSION = "1.7.1";
+const SERVER_VERSION = "2.0.0";
 const ROOT = path.join(__dirname, "..");
 const STATUS_TIMEOUT_MS = 1500;
 const TAKEOVER_WAIT_MS = 1500;
 const AUDIT_DIR = process.env.AG_BRIDGE_AUDIT_DIR || path.join(os.homedir(), ".gemini", "memory", "browser-bridge");
+const PROCESS_SESSION_ID = "mcp-" + crypto.randomBytes(4).toString("hex");
+const RAW_DEFAULT_MODE = String(process.env.ANTIGRAVITY_BROWSER_MODE || process.env.AG_BRIDGE_MODE || "isolated").toLowerCase();
+const DEFAULT_TRACK_MODE = RAW_DEFAULT_MODE === "extension" ? "extension" : "isolated";
+
+const EXTENSION_ONLY_TOOLS = new Set([
+  "browser_record_start",
+  "browser_record_stop",
+  "browser_record_list",
+  "browser_record_replay",
+  "browser_extension_reload",
+]);
+const ISOLATED_ONLY_TOOLS = new Set(["browser_auth_sync", "browser_open_auth_window"]);
 
 const USAGE = `
-antigravity-browser-bridge —— 让 Antigravity 驱动本机 Edge / Chrome 的 MCP 服务
+antigravity-browser-bridge —— 双轨浏览器自动化 MCP 服务（默认无头独立并发 + 可选扩展录制）
 
 用法：
-  node mcp-server/server.js [--port 8765] [--host 127.0.0.1] [--token <令牌>]
-  node mcp-server/server.js --print-config   # 只打印解析后的配置（默认 127.0.0.1:8765），不启动服务
+  node mcp-server/server.js [--port 8767] [--host 127.0.0.1] [--token <令牌>]
+  node mcp-server/server.js --print-config   # 只打印解析后的配置（默认 127.0.0.1:8767），不启动服务
 
 环境变量：
-  AG_BRIDGE_PORT       桥接端口（默认 8765）
-  AG_BRIDGE_HOST       监听地址（默认 127.0.0.1，只监听本机）
-  AG_BRIDGE_TOKEN      可选访问令牌，需与扩展弹窗里填的一致
-  AG_BRIDGE_DRY_RUN    设为 1 时 browser_launch 只返回命令行，不启动浏览器
+  AG_BRIDGE_PORT            桥接端口（默认 8767）
+  AG_BRIDGE_HOST            监听地址（默认 127.0.0.1，只监听本机）
+  AG_BRIDGE_TOKEN           可选访问令牌，需与扩展弹窗里填的一致
+  ANTIGRAVITY_BROWSER_MODE  默认引擎轨：isolated（默认，后台无头）/ extension
+  AG_BRIDGE_DRY_RUN         设为 1 时 browser_launch 只返回命令行，不启动浏览器
 
 多会话：第一个进程是 Leader；后续进程检测到本桥接的 /status 后自动成为 Follower，
-工具调用经 POST /rpc 中继。Leader 退出后，Follower 在下次调用时自动接管端口。
+工具调用经 POST /rpc 中继并自动携带独立 sessionId 隔离。Leader 退出后，Follower 自动接管。
 
 本进程通过 stdio 与 Antigravity 通信，请勿手动运行后直接在里面输入命令。
 `.trim();
@@ -56,7 +71,7 @@ antigravity-browser-bridge —— 让 Antigravity 驱动本机 Edge / Chrome 的
 function parseArgs(argv) {
   const out = {
     host: process.env.AG_BRIDGE_HOST || "127.0.0.1",
-    port: Number(process.env.AG_BRIDGE_PORT || 8765),
+    port: Number(process.env.AG_BRIDGE_PORT || 8767),
     token: process.env.AG_BRIDGE_TOKEN || "",
     help: false,
     printConfig: false,
@@ -69,7 +84,7 @@ function parseArgs(argv) {
     else if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--print-config") out.printConfig = true;
   }
-  if (!Number.isFinite(out.port) || out.port <= 0 || out.port > 65535) out.port = 8765;
+  if (!Number.isFinite(out.port) || out.port <= 0 || out.port > 65535) out.port = 8767;
   return out;
 }
 
@@ -145,9 +160,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* ------------------------------------------------------------------ 状态 */
 
 let bridge = null;
+let isolatedEngine = new IsolatedEngine({ log });
+const sessionTrackModes = new Map();
 let mode = "starting"; // starting | leader | follower | unavailable
 let leaderInfo = null;
 let bridgeError = "";
+
+function withSession(args) {
+  const copy = Object.assign({}, args || {});
+  if (!copy.sessionId) copy.sessionId = PROCESS_SESSION_ID;
+  return copy;
+}
+
+function resolveTrack(name, args = {}) {
+  if (EXTENSION_ONLY_TOOLS.has(name)) return "extension";
+  if (ISOLATED_ONLY_TOOLS.has(name)) return "isolated";
+  const sid = (args && args.sessionId) || PROCESS_SESSION_ID;
+  const rawExplicit = args && args.mode;
+  if (rawExplicit === "extension" || rawExplicit === "isolated") return rawExplicit;
+  return sessionTrackModes.get(sid) || DEFAULT_TRACK_MODE;
+}
 
 const GONE_CODES = new Set([
   "ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH",
@@ -180,11 +212,176 @@ function createBridge() {
   });
 }
 
-async function executeLeaderTool(name, args, timeoutMs) {
+const STALE_EXTENSION_RE = /不认识这个工具|未知消息类型/;
+
+function isStaleExtensionError(error) {
+  return STALE_EXTENSION_RE.test(String((error && error.message) || error || ""));
+}
+
+/**
+ * 更新插件文件后 Edge 仍在跑旧 service worker，录制工具会全部"不认识"。
+ * 这里用扩展自己已有的 browser_open + browser_evaluate 打开 popup 并 reload，
+ * 等新 service worker 重新连上即可自愈。
+ */
+async function reloadExtension() {
+  const client = (bridge.list() || [])[0];
+  if (!client) return { ok: false, error: "当前没有浏览器扩展连接" };
+  if (!client.id) {
+    return {
+      ok: false,
+      error: "扩展版本过旧，未上报扩展 ID；请在扩展弹窗点击「⟳ 重载扩展」，或到 edge://extensions 重新加载「谷谷嘎嘎正在控制你的浏览器」",
+    };
+  }
+  const url = "chrome-extension://" + client.id + "/popup.html?reload=" + Date.now();
+  let opened;
+  try {
+    opened = await bridge.call("browser_open", { url, newTab: true }, 15000);
+  } catch (e) {
+    return { ok: false, error: "打开扩展页面失败：" + ((e && e.message) || e) };
+  }
+  const tabId = opened && opened.tabId;
+  if (!tabId) return { ok: false, error: "打开扩展页面失败：没有拿到标签页" };
+  await sleep(600);
+  try {
+    await bridge.call("browser_evaluate", {
+      tabId,
+      expression: 'setTimeout(()=>chrome.runtime.reload(),80); "reloading"',
+    }, 8000);
+  } catch (e) { /* 页面随扩展卸载会中断返回，属正常 */ }
+  const deadline = Date.now() + 15000;
+  let reconnected = false;
+  while (Date.now() < deadline) {
+    await sleep(400);
+    const list = bridge.list() || [];
+    if (list.some((c) => c.id === client.id && (c.features || []).includes("recordReplay"))) {
+      reconnected = true;
+      break;
+    }
+  }
+  try {
+    await bridge.call("browser_tabs", { action: "close", tabId }, 5000);
+  } catch (e) { /* 标签可能已随重载关闭 */ }
+  return reconnected
+    ? { ok: true, reloaded: true, extensionId: client.id, version: (bridge.list()[0] || {}).version }
+    : { ok: false, error: "已触发扩展重载，但 15 秒内没有重新连上；请手动到 edge://extensions 重新加载" };
+}
+
+async function recordCall(name, args, timeoutMs) {
+  try {
+    return await bridge.call(name, args, timeoutMs);
+  } catch (error) {
+    if (!isStaleExtensionError(error)) throw error;
+    log("扩展仍在运行旧代码（" + name + "），自动重载扩展…");
+    const reload = await reloadExtension();
+    if (!reload.ok) {
+      error.message = ((error && error.message) || String(error)) + "（" + reload.error + "）";
+      throw error;
+    }
+    log("扩展已重载，重试 " + name);
+    return await bridge.call(name, args, timeoutMs);
+  }
+}
+
+function annotateToolResult(result, track, sid) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  if (result.mode === undefined) result.mode = track;
+  if (result.sessionId === undefined) result.sessionId = sid;
+  if (result.headless === undefined) {
+    result.headless = track === "isolated"
+      ? (isolatedEngine.authWindowContext ? false : isolatedEngine.headless)
+      : false;
+  }
+  if (result.instanceReused === undefined) {
+    result.instanceReused = track === "isolated"
+      ? (!!isolatedEngine.context && result.stage !== "connected" && !result.dryRun)
+      : !!(bridge && typeof bridge.list === "function" && bridge.list().length > 0 && result.stage !== "connected" && !result.dryRun);
+  }
+  return result;
+}
+
+async function dispatchBrowserLaunch(rawArgs) {
+  const args = withSession(rawArgs);
+  const sid = args.sessionId;
+  const explicitMode = args.mode === "extension" || args.mode === "isolated" ? args.mode : null;
+  const track = resolveTrack("browser_launch", args);
+  const isDryRun = args.dryRun === true || process.env.AG_BRIDGE_DRY_RUN === "1";
+
+  let result;
+  try {
+    if (track === "extension") {
+      result = await runBrowserLaunch(args, { rootDir: ROOT, port: opts.port, listClients });
+      if (mode === "unavailable" && result && result.ok === false) {
+        result.bridgeMode = mode;
+        result.bridgeError = bridgeError;
+        if (result.stage === "launched-without-extension" && result.message) {
+          result.message += " 另外，本地桥接端口当前不可用：" + bridgeError;
+        }
+      }
+    } else {
+      result = await isolatedEngine.browser_launch(args);
+    }
+  } catch (e) {
+    if (e && e.payload) {
+      result = e.payload;
+    } else {
+      result = {
+        ok: false,
+        mode: track,
+        headless: track === "isolated" ? (args.headless !== false) : false,
+        sessionId: sid,
+        instanceReused: false,
+        stage: "error",
+        code: (e && e.code) || "LAUNCH_ERROR",
+        error: (e && e.message) || String(e),
+      };
+    }
+  }
+
+  annotateToolResult(result, track, sid);
+  if (!isDryRun && explicitMode && result && result.ok === true) {
+    sessionTrackModes.set(sid, explicitMode);
+  }
+  return result;
+}
+
+async function executeLeaderTool(name, rawArgs, timeoutMs) {
   if (!bridge || !bridge.started) throw new BridgeError("BRIDGE_UNAVAILABLE", bridgeError || "桥接尚未就绪");
+  const args = withSession(rawArgs);
+  const sid = args.sessionId;
+  const track = resolveTrack(name, args);
+
+  if (name === "browser_extension_reload") {
+    return annotateToolResult(await reloadExtension(), "extension", sid);
+  }
+
+  if (name === "browser_launch") {
+    return await dispatchBrowserLaunch(args);
+  }
+
+  if (name === "browser_auth_sync") {
+    if (args.action === "import" && args.source === "extension") {
+      const extCookiesRes = await bridge.call("browser_get_cookies", {
+        url: args.url,
+        domain: args.domain,
+        tabId: args.tabId,
+        browser: args.browser,
+      }, timeoutMs || 15000);
+      if (!extCookiesRes || extCookiesRes.ok === false) return extCookiesRes;
+      const merged = Object.assign({}, args, {
+        cookies: Array.isArray(extCookiesRes.cookies) ? extCookiesRes.cookies : (args.cookies || []),
+      });
+      const res = await isolatedEngine.browser_auth_sync(merged);
+      return Object.assign({ sourceUrl: extCookiesRes.url, syncedFromExtension: true }, res);
+    }
+    return await isolatedEngine.browser_auth_sync(args);
+  }
+
+  if (name === "browser_open_auth_window") {
+    return await isolatedEngine.browser_open_auth_window(args);
+  }
 
   if (name === "browser_record_stop") {
-    const extRes = await bridge.call("browser_record_stop", args, timeoutMs);
+    const extRes = await recordCall("browser_record_stop", args, timeoutMs);
     if (!extRes || extRes.ok === false || !extRes.recording) {
       return extRes;
     }
@@ -220,10 +417,10 @@ async function executeLeaderTool(name, args, timeoutMs) {
     }
     if (action === "get") {
       const targetId = (args && args.recordingId) || "latest";
-      let rec = loadRecording(targetId);
+      let rec = loadRecording(targetId, { allowWorkflowFile: false });
       if (!rec && bridge.list().length > 0) {
         try {
-          const ext = await bridge.call("browser_record_list", { browser: args && args.browser }, 5000);
+          const ext = await recordCall("browser_record_list", { browser: args && args.browser }, 5000);
           if (ext && ext.lastCompletedRecording) {
             rec = saveRecording(ext.lastCompletedRecording).recording;
           }
@@ -243,7 +440,7 @@ async function executeLeaderTool(name, args, timeoutMs) {
     let extStatus = null;
     if (bridge.list().length > 0) {
       try {
-        extStatus = await bridge.call("browser_record_list", { browser: args && args.browser }, 5000);
+        extStatus = await recordCall("browser_record_list", { browser: args && args.browser }, 5000);
         if (extStatus && extStatus.lastCompletedRecording) {
           const existing = loadRecording(extStatus.lastCompletedRecording.recordingId);
           if (!existing) saveRecording(extStatus.lastCompletedRecording);
@@ -266,8 +463,9 @@ async function executeLeaderTool(name, args, timeoutMs) {
     let paramDefs = {};
     let sourceTitle = "";
     if (!rawSteps || !rawSteps.length) {
+      const hasWorkflowPath = !!(args && args.workflowPath);
       const idOrPath = (args && (args.workflowPath || args.recordingId)) || "latest";
-      const loaded = loadRecording(idOrPath);
+      const loaded = loadRecording(idOrPath, { allowWorkflowFile: hasWorkflowPath });
       if (!loaded || !Array.isArray(loaded.steps) || !loaded.steps.length) {
         return {
           ok: false,
@@ -279,14 +477,27 @@ async function executeLeaderTool(name, args, timeoutMs) {
       sourceTitle = loaded.title || loaded.recordingId || "";
     }
     const interpolated = interpolateSteps(rawSteps, (args && args.vars) || {}, paramDefs);
-    const replayRes = await bridge.call("browser_record_replay", Object.assign({}, args, { steps: interpolated }), timeoutMs);
+    const replayRes = await recordCall("browser_record_replay", Object.assign({}, args, { steps: interpolated }), timeoutMs);
     return Object.assign({
       sourceTitle: sourceTitle || undefined,
       appliedVars: (args && args.vars) || {},
     }, replayRes);
   }
 
-  return bridge.call(name, args, timeoutMs);
+  if (track === "isolated" && typeof isolatedEngine[name] === "function") {
+    try {
+      const res = await isolatedEngine[name](args);
+      return annotateToolResult(res, "isolated", sid);
+    } catch (e) {
+      if (e && e.payload) return annotateToolResult(e.payload, "isolated", sid);
+      throw e;
+    }
+  }
+
+  const extArgs = Object.assign({}, args);
+  if (extArgs.mode === "extension" || extArgs.mode === "isolated") delete extArgs.mode;
+  delete extArgs.sessionId;
+  return annotateToolResult(await bridge.call(name, extArgs, timeoutMs), "extension", sid);
 }
 
 /* ------------------------------------------------- 访问 Leader 的本地 HTTP */
@@ -350,8 +561,9 @@ async function fetchLeaderStatus(timeoutMs) {
 }
 
 async function relayCall(tool, args, timeoutMs) {
+  const payloadArgs = withSession(args);
   const r = await leaderRequest("POST", "/rpc", {
-    body: { tool, args, timeoutMs },
+    body: { tool, args: payloadArgs, timeoutMs },
     token: opts.token,
     timeoutMs: Math.min(timeoutMs + 5000, 140000),
   });
@@ -421,18 +633,28 @@ async function tryTakeover(reason) {
 }
 
 async function callTool(name, args, timeoutMs) {
+  const syncFollowerLaunchMode = (result) => {
+    if (name !== "browser_launch") return result;
+    const payload = withSession(args);
+    const explicitMode = payload.mode === "extension" || payload.mode === "isolated" ? payload.mode : null;
+    const isDryRun = payload.dryRun === true || process.env.AG_BRIDGE_DRY_RUN === "1";
+    if (!isDryRun && explicitMode && result && result.ok === true) {
+      sessionTrackModes.set(payload.sessionId, explicitMode);
+    }
+    return result;
+  };
   if (mode === "leader") {
     return executeLeaderTool(name, args, timeoutMs);
   }
   if (mode === "follower") {
     try {
-      return await relayCall(name, args, timeoutMs);
+      return syncFollowerLaunchMode(await relayCall(name, args, timeoutMs));
     } catch (e) {
       if (!isLeaderGone(e)) throw e;
       const tookOver = await tryTakeover(e.code || e.message);
       if (tookOver) return executeLeaderTool(name, args, timeoutMs);
       try {
-        return await relayCall(name, args, timeoutMs);
+        return syncFollowerLaunchMode(await relayCall(name, args, timeoutMs));
       } catch (e2) {
         throw new BridgeError("LEADER_GONE", `无法连接 Leader：${(e2 && e2.message) || e2}`);
       }
@@ -482,23 +704,6 @@ const readyPromise = main().catch((e) => {
 
 /* ------------------------------------------------------------------ 工具 */
 
-async function handleBrowserLaunch(id, args) {
-  let result;
-  try {
-    result = await runBrowserLaunch(args, { rootDir: ROOT, port: opts.port, listClients });
-  } catch (e) {
-    result = { ok: false, stage: "error", code: (e && e.code) || "LAUNCH_ERROR", error: (e && e.message) || String(e) };
-  }
-  if (mode === "unavailable" && result && result.ok === false) {
-    result.bridgeMode = mode;
-    result.bridgeError = bridgeError;
-    if (result.stage === "launched-without-extension" && result.message) {
-      result.message += " 另外，本地桥接端口当前不可用：" + bridgeError;
-    }
-  }
-  reply(id, { content: toContent(result), isError: result.ok === false });
-}
-
 async function handleToolCall(id, params) {
   const name = params && params.name;
   const args = (params && params.arguments) || {};
@@ -507,12 +712,11 @@ async function handleToolCall(id, params) {
     return reply(id, { content: [{ type: "text", text: "未知工具：" + name }], isError: true });
   }
 
-  // browser_launch 完全由本地进程执行：不经过扩展，也不经过 Leader 中继。
-  if (name === "browser_launch") {
-    return await handleBrowserLaunch(id, args);
-  }
-
   if (mode === "unavailable") {
+    if (name === "browser_launch") {
+      const res = await dispatchBrowserLaunch(args);
+      return reply(id, { content: toContent(res), isError: res.ok === false });
+    }
     return reply(id, {
       content: [{ type: "text", text: "桥接不可用：" + bridgeError }],
       isError: true,
@@ -567,13 +771,10 @@ async function handleMessage(msg) {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
           instructions:
-            "本服务把浏览器控制权交给本机已安装的「antigravity浏览器控制」扩展（品牌：谷谷嘎嘎），直接操作用户日常在用的 Edge/Chrome（保留登录态）。" +
-            "默认优先控制 Edge：先 browser_launch（browser=\"edge\"，必要时 profileDirectory / url）确保浏览器与扩展就绪，" +
-            "再 browser_status 确认连接，然后 browser_snapshot 拿确定性 ref，执行 browser_click / browser_type，最后再 snapshot 验证结果。" +
-            "控制默认发生在当前窗口内的「谷谷嘎嘎控制中」紫色标签组（leaseTab），会激活该标签页以便用户看到鼠标与原生提示条；用户原标签页保持打开且不被改写，需要指定其他标签时显式传 tabId。" +
-            modeNote +
-            "控制类工具首次触达专属标签页时会自动附加 CDP，浏览器会在该标签页显示标准调试提示条（扩展名已设为「谷谷嘎嘎正在控制你的浏览器」），并在页面内显示常驻可见鼠标；不再额外绘制页面顶栏。" +
-            "鼠标层 pointer-events:none，不挡用户或页面的点击。提示条由浏览器原生控件管理，扩展无法改写它的模板文案或关闭按钮。",
+            "本服务采用双轨架构（默认 isolated 无头独立并发引擎 + 可选 extension 本机扩展通道）。" +
+            "默认 isolated 轨通过独立 user-data-dir 无头驱动 Edge/Chrome：零黄色调试条、不抢用户焦点、最小化或锁屏下仍可截图，多子 Agent 自动按 sessionId 并发隔离。" +
+            "需要登录态时可用 browser_open_auth_window 弹出独立可见登录窗口或 browser_auth_sync 同步；仅当明确需要操作用户日常浏览器或 RPA 录制回放（browser_record_*）时传入 mode=\"extension\"。" +
+            modeNote,
         });
       }
       case "notifications/initialized":
@@ -626,7 +827,7 @@ rl.on("line", (line) => {
 function shutdown(reason) {
   log("退出：" + reason);
   if (bridge) bridge.stop();
-  process.exit(0);
+  Promise.resolve(isolatedEngine.shutdown()).catch(() => {}).finally(() => process.exit(0));
 }
 
 rl.on("close", () => shutdown("stdin 已关闭"));

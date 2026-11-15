@@ -22,8 +22,16 @@ const MAX_ZIP_BYTES = 50 * 1024 * 1024;
 const ALLOWED_HOSTS = new Set(["github.com", "api.github.com"]);
 
 function useSystemProxy() {
+  const noProxy = new Set(String(process.env.NO_PROXY || process.env.no_proxy || "").split(",").map((item) => item.trim()).filter(Boolean));
+  noProxy.add("127.0.0.1");
+  noProxy.add("localhost");
+  const applyNoProxy = () => {
+    process.env.NO_PROXY = [...noProxy].join(",");
+    process.env.no_proxy = process.env.NO_PROXY;
+  };
   if (process.env.HTTPS_PROXY || process.env.https_proxy) {
     process.env.NODE_USE_ENV_PROXY = "1";
+    applyNoProxy();
     return;
   }
   if (process.platform !== "win32") return;
@@ -41,6 +49,7 @@ function useSystemProxy() {
     process.env.NODE_USE_ENV_PROXY = "1";
     process.env.HTTPS_PROXY = `http://${server}`;
     process.env.HTTP_PROXY = `http://${server}`;
+    applyNoProxy();
   } catch (error) {}
 }
 
@@ -53,6 +62,7 @@ const COMPONENT_ORDER = [
   "mnemon",
   "computer-use",
   "antigravity-browser-bridge",
+  "antigravity-remote-mogu",
 ];
 
 function installedPlugins() {
@@ -435,6 +445,43 @@ function restoreThemeLocal(saved) {
   }
 }
 
+async function applyRemoteComponent(component) {
+  const port = Number(process.env.AG_REMOTE_PORT || 8791);
+  let response;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/api/update/apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version: component.version }),
+      signal: AbortSignal.timeout(360000),
+    });
+  } catch (error) {
+    throw new Error(`远程服务未运行或无法连接（${error?.message || error}），请先重启 Antigravity`);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `远程服务返回 HTTP ${response.status}，请先重启 Antigravity 加载新版远程插件`);
+  }
+  if (!data.updated) {
+    return {
+      name: component.name,
+      displayName: component.displayName,
+      from: data.current || component.installedVersion,
+      to: data.latest || component.version,
+      updated: false,
+      message: data.message || "已是最新版本",
+    };
+  }
+  return {
+    name: component.name,
+    displayName: component.displayName,
+    from: data.from || component.installedVersion,
+    to: data.to || component.version,
+    updated: true,
+    backup: data.backup || "",
+  };
+}
+
 async function applyComponent(component) {
   const local = component.name === LOCAL.name ? { dir: ROOT, pkg: LOCAL } : installedPlugins().get(component.name);
   if (!local?.dir) throw new Error("未安装该插件，已跳过");
@@ -494,7 +541,9 @@ async function applyUpdate() {
   const results = [];
   for (const component of outdated) {
     try {
-      results.push(await applyComponent(component));
+      results.push(component.name === "antigravity-remote-mogu"
+        ? await applyRemoteComponent(component)
+        : await applyComponent(component));
     } catch (error) {
       results.push({
         name: component.name,
@@ -582,4 +631,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { applyComponent, checkUpdate, evaluateComponents, manifestComponents, installedPlugins, normalizeVersion, isNewer };
+module.exports = { applyComponent, applyRemoteComponent, applyUpdate, checkUpdate, evaluateComponents, manifestComponents, installedPlugins, normalizeVersion, isNewer };

@@ -260,7 +260,10 @@ class Toolset:
         """Cheap visual+window signature; None disables the watchdog."""
         try:
             if getattr(self.backend, "platform", "") == "windows":
-                shot = self.backend.screenshot(None, None, 120)
+                try:
+                    shot = self.backend.screenshot(None, None, 120, save_to_disk=False)
+                except TypeError:
+                    shot = self.backend.screenshot(None, None, 120)
                 core = hashlib.sha1(shot["png"]).hexdigest()
             else:
                 tree = self.backend.ui_tree(max_depth=3, max_elements=80)
@@ -385,19 +388,30 @@ class Toolset:
                         window = self.backend.window_at(point[0], point[1])
                     except BackendError:
                         window = None
+        if window is None and hasattr(self.backend, "active_window"):
+            try:
+                window = self.backend.active_window()
+            except (BackendError, UnsupportedAction):
+                window = None
         if window:
             context["app"] = window.get("app") or ""
             context["window_title"] = window.get("title") or ""
         if name == "open_app":
             context["app"] = str(args.get("target") or "")
-        if name == "type_text" and self.policy.data.get("protectPasswordFields", True):
-            try:
-                focused = self.backend.focused_element()
-            except (BackendError, UnsupportedAction):
-                focused = None
-            if focused and focused.get("password"):
-                context["password_field"] = True
-                context["app"] = context.get("app") or ""
+        if self.policy.data.get("protectPasswordFields", True):
+            check_password = name == "type_text"
+            if name == "press_keys":
+                combo = set(normalize_combo(args.get("keys") or []))
+                if {"ctrl", "v"}.issubset(combo) or {"lctrl", "v"}.issubset(combo) or {"rctrl", "v"}.issubset(combo) or {"shift", "insert"}.issubset(combo):
+                    check_password = True
+            if check_password:
+                try:
+                    focused = self.backend.focused_element()
+                except (BackendError, UnsupportedAction):
+                    focused = None
+                if focused and (focused.get("password") or focused.get("isPassword")):
+                    context["password_field"] = True
+                    context["app"] = context.get("app") or ""
         return context
 
     # -- tool definitions --------------------------------------------------

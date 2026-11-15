@@ -179,17 +179,23 @@ export async function runCommand({ text, ctx }) {
       const info = await listModels(workbench);
       if (!info.ok) return { handled: true, reply: `⚠️ 读不到模型菜单：${info.reason}` };
       if (command === 'models' || !arg) {
-        const lines = [`当前模型：${info.current}`];
-        info.items.forEach((item, i) => lines.push(`  ${item.label === info.current ? '●' : ' '} ${i + 1}. ${item.label}`));
+        const lines = [`当前模型：${info.current || '（未知）'}`];
+        info.items.forEach((item, i) => {
+          const mark = item.label === info.current ? '●' : ' ';
+          const quota = typeof item.quota === 'number' ? ` (${Math.round(item.quota * 100)}%)` : '';
+          lines.push(`  ${mark} ${i + 1}. ${item.label}${quota}`);
+        });
         lines.push('', '回复 /model <序号|名称> 切换');
         return { handled: true, reply: lines.join('\n') };
       }
       const num = Number.parseInt(arg, 10);
       const target = Number.isFinite(num) ? info.items[num - 1]?.label : arg;
       if (!target) return { handled: true, reply: '序号超出范围。' };
-      const picked = await workbench.sendPrompt
-        ? await workbench.mutex.run(async () => workbench._selectModel(target))
-        : { ok: false, reason: 'unsupported' };
+      const picked = workbench.selectModel
+        ? await workbench.selectModel(target)
+        : workbench.sendPrompt
+          ? await workbench.mutex.run(async () => workbench._selectModel(target))
+          : { ok: false, reason: 'unsupported' };
       if (!picked.ok) return { handled: true, reply: `⚠️ 切换失败：${picked.reason}` };
       state.setBinding(bot.id, chatId, { ...binding, model: picked.current || target });
       return { handled: true, reply: `🎛 已切到模型：${picked.current || target}` };
@@ -297,8 +303,17 @@ export function listWorkspaces(index) {
 
 async function listModels(workbench) {
   try {
-    const result = await workbench.listModels();
-    return { ok: result.ok, current: result.current || '', items: (result.items || []).map((label, i) => ({ index: i, label })) };
+    const result = await workbench.listModels({ force: true });
+    const metaByLabel = new Map((result.models || []).map((m) => [m.label, m]));
+    return {
+      ok: result.ok,
+      current: result.current || '',
+      items: (result.items || []).map((label, i) => ({
+        index: i,
+        label,
+        quota: metaByLabel.get(label)?.quota ?? null,
+      })),
+    };
   } catch (error) {
     return { ok: false, reason: error?.message || String(error), items: [] };
   }

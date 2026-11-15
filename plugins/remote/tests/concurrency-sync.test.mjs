@@ -13,6 +13,16 @@ import { WeixinBot } from '../src/channels/weixin/weixin-bot.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 单测不许碰真实 Antigravity：给一个不存在的端口文件，就绪检查由用例自己桩掉
+function makeWorkbench() {
+  const wb = new Workbench({
+    portFile: path.join(os.tmpdir(), `ag-test-no-port-${process.pid}-${Math.random()}`),
+    autoLaunch: false,
+  });
+  wb.ensureReady = async () => ({});
+  return wb;
+}
+
 function makeState() {
   const bindings = new Map();
   return {
@@ -49,7 +59,7 @@ const fakeIndex = {
 };
 
 test('三个聊天同一毫秒提交，界面动作严格串行（零串台）', async () => {
-  const workbench = new Workbench();
+  const workbench = makeWorkbench();
   let active = 0;
   let maxActive = 0;
   workbench._switchTo = async (id) => {
@@ -84,7 +94,7 @@ test('三个聊天同一毫秒提交，界面动作严格串行（零串台）',
 });
 
 test('同一会话第二次提交会先等前一轮结束（排队模式）', async () => {
-  const workbench = new Workbench();
+  const workbench = makeWorkbench();
   workbench._submit = async () => ({ ok: true });
   workbench.snapshot = async () => ({ conversationId: 'conv-1', model: '' });
   workbench._switchTo = async () => ({ ok: true });
@@ -108,7 +118,7 @@ test('同一会话第二次提交会先等前一轮结束（排队模式）', as
 });
 
 test('插话模式不等待，直接发', async () => {
-  const workbench = new Workbench();
+  const workbench = makeWorkbench();
   let sent = 0;
   workbench._submit = async () => {
     sent += 1;
@@ -366,7 +376,7 @@ test('对话还在跑时补发要留在队列里，不能丢', async () => {
 /* -------------------------------------------------- 绝不劫持当前对话 */
 
 test('切换失败时绝不把消息发到当前对话', async () => {
-  const wb = new Workbench();
+  const wb = makeWorkbench();
   wb._switchTo = async () => ({ ok: false, reason: 'desktop-busy' });
   let submitted = 0;
   wb._submit = async () => { submitted += 1; return { ok: true }; };
@@ -381,7 +391,7 @@ test('已有绑定时发到别的对话不会悄悄改写绑定', async () => {
   const state = makeState();
   state.setBinding('bot-1', 'chat-1', { conversationId: 'conv-bound' });
 
-  const workbench = new Workbench();
+  const workbench = makeWorkbench();
   workbench.sendPrompt = async () => ({ ok: true, conversationId: 'conv-other' });
 
   const harness = new RemoteHarness({ workbench, index: fakeIndex, state, logger: { warn() {}, info() {}, debug() {} } });
@@ -393,7 +403,7 @@ test('已有绑定时发到别的对话不会悄悄改写绑定', async () => {
 });
 
 test('桌面正忙时 _switchTo 必须失败（旧行为是 ok:true 的 busy-skip）', async () => {
-  const wb = new Workbench();
+  const wb = makeWorkbench();
   const busyState = { conversationId: 'conv-current', hasInput: true, busy: true };
   wb.ensure = async () => ({ evaluate: async () => busyState, clickAt: async () => {} });
 

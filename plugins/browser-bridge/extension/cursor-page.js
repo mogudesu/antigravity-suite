@@ -10,7 +10,7 @@
  * - 页面脚本看不到 __AGBB_CURSOR（隔离世界），受保护页面注入失败是预期行为。
  */
 (function () {
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
   var HOST_ID = "agbb-control-cursor-host";
   var STATE_KEY = "__AGBB_CURSOR_STATE__";
   var HIDE_MS = 45000;
@@ -23,25 +23,25 @@
   var CSS = [
     ".layer{position:absolute;left:0;top:0;width:0;height:0;pointer-events:none}",
     ".spot{position:absolute;left:0;top:0;width:132px;height:132px;margin:-66px 0 0 -66px;border-radius:50%;",
-    "background:radial-gradient(circle,rgba(34,227,255,.14) 0%,rgba(34,227,255,.06) 35%,transparent 70%);",
+    "background:radial-gradient(circle,rgba(246,216,147,.16) 0%,rgba(167,139,250,.08) 38%,transparent 70%);",
     "transform:translate3d(-200px,-200px,0);transition:transform 180ms cubic-bezier(.2,.8,.2,1);opacity:.9}",
     ".pointer{position:absolute;left:0;top:0;width:26px;height:30px;",
     "transform:translate3d(-100px,-100px,0);transition:transform 150ms cubic-bezier(.2,.8,.2,1);",
-    "filter:drop-shadow(0 0 7px rgba(34,227,255,.55)) drop-shadow(0 2px 3px rgba(0,0,0,.55))}",
+    "filter:drop-shadow(0 0 8px rgba(246,216,147,.5)) drop-shadow(0 2px 3px rgba(0,0,0,.55))}",
     ".pointer svg{display:block;width:26px;height:30px;overflow:visible}",
     ".ring{position:absolute;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;",
-    "border:1.5px solid rgba(34,227,255,.72);border-radius:50%;",
-    "box-shadow:0 0 14px rgba(34,227,255,.24),inset 0 0 10px rgba(34,227,255,.10);",
+    "border:1.5px solid rgba(246,216,147,.75);border-radius:50%;",
+    "box-shadow:0 0 14px rgba(246,216,147,.26),inset 0 0 10px rgba(167,139,250,.12);",
     "opacity:0;transform:translate3d(-100px,-100px,0);",
     "transition:transform 150ms cubic-bezier(.2,.8,.2,1),opacity 140ms ease}",
     ".ring.on{opacity:1}",
     ".ripple{position:absolute;left:0;top:0;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;",
-    "border:2px solid rgba(34,227,255,.9);opacity:0;",
+    "border:2px solid rgba(246,216,147,.9);opacity:0;",
     "animation:agbb-ripple 520ms cubic-bezier(.2,.8,.2,1) both}",
     ".label{position:absolute;left:0;top:0;transform:translate3d(-100px,-100px,0);",
     "margin:22px 0 0 18px;padding:3px 8px;border-radius:999px;",
-    "background:rgba(8,12,20,.94);color:#9fe9ff;border:1px solid rgba(34,227,255,.38);",
-    "box-shadow:0 6px 18px rgba(0,0,0,.3),0 0 12px rgba(34,227,255,.1);",
+    "background:rgba(10,8,20,.94);color:#f7e7c3;border:1px solid rgba(246,216,147,.4);",
+    "box-shadow:0 6px 18px rgba(0,0,0,.32),0 0 12px rgba(246,216,147,.12);",
     "font:600 11px/1.4 -apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif;",
     "white-space:nowrap;opacity:0;transition:opacity 120ms ease;letter-spacing:.02em}",
     ".label.on{opacity:1}",
@@ -96,7 +96,7 @@
       '<svg viewBox="0 0 26 30" aria-hidden="true">',
       '<path d="M3 2.5 L23 13.2 L13.7 15.4 L18.1 25.4 L13.8 27.3 L9.5 17.3 L3 23.2 Z" ',
       'fill="#F4FBFF" stroke="#0B0E14" stroke-width="2.2" stroke-linejoin="round"/>',
-      '<path d="M3 2.5 L23 13.2 L13.7 15.4 L18.1 25.4" fill="none" stroke="rgba(34,227,255,.85)" stroke-width="1.1" stroke-linejoin="round"/>',
+      '<path d="M3 2.5 L23 13.2 L13.7 15.4 L18.1 25.4" fill="none" stroke="rgba(246,216,147,.9)" stroke-width="1.1" stroke-linejoin="round"/>',
       '</svg>'
     ].join("");
 

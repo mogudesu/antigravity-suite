@@ -4,7 +4,7 @@ globs: "**/PERSONA.md, **/USER.md, **/MEMORY.md, **/mnemon-vault/**, **/.mnemon/
 description: Conventions for the plain-text memory files Mnemon keeps on disk.
 ---
 
-- These files are Mnemon's store, not scratch space: write them through `mnemon_memory_runtime_write` (`kind: persona | user | memory`), `mnemon_memory_save` or the `mnemon` CLI so revisions, mirroring and receipts stay consistent.
+- These files are Mnemon's store, not scratch space: write them through `memory_profile` (`set_persona` | `set_user` | `set_memory`), `memory_save` or the `mnemon` CLI so revisions, mirroring and receipts stay consistent.
 - `PERSONA.md` is the permanent AI persona: name, role, voice, engineering taste, boundaries. It is injected at every SessionStart and never truncated by the resident budget — keep it precise and free of project trivia.
 - `USER.md` holds stable facts about the user; `MEMORY.md` holds what the next turn needs. Neither should grow into a document — move anything longer into a project document.
 - One fact per line. Keep the existing headings; append under them rather than rewriting the file.

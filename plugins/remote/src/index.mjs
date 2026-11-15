@@ -163,12 +163,30 @@ function broadcast(event, data = {}) {
 }
 
 function channelFor(platform, bot) {
-  if (platform === 'weixin') return new WeixinBot({ bot, secrets: secrets.get(bot.id), hub, logger });
-  if (platform === 'feishu') return new FeishuBot({ bot, secrets: secrets.get(bot.id), hub, logger });
+  const seenIds = state.getSeenMessages(bot.id);
+  const onSeen = (entries) => {
+    if (state.getBot(bot.id)) state.setSeenMessages(bot.id, entries);
+  };
+  if (platform === 'weixin') {
+    return new WeixinBot({
+      bot,
+      secrets: secrets.get(bot.id),
+      hub,
+      logger,
+      onCursor: (cursor) => {
+        if (secrets.get(bot.id)) secrets.merge(bot.id, { getUpdatesBuf: cursor });
+      },
+      seenIds,
+      onSeen,
+    });
+  }
+  if (platform === 'feishu') {
+    return new FeishuBot({ bot, secrets: secrets.get(bot.id), hub, logger, seenIds, onSeen });
+  }
   if (platform === 'qq') {
     const cfg = secrets.get(bot.id) || {};
-    if (cfg.mode === 'onebot') return new OneBotChannel({ bot, secrets: cfg, hub, logger });
-    return new QQOfficialBot({ bot, secrets: cfg, hub, logger });
+    if (cfg.mode === 'onebot') return new OneBotChannel({ bot, secrets: cfg, hub, logger, seenIds, onSeen });
+    return new QQOfficialBot({ bot, secrets: cfg, hub, logger, seenIds, onSeen });
   }
   throw new Error(`不支持的平台：${platform}`);
 }
@@ -199,6 +217,9 @@ const hub = {
     const command = await runCommand({ text, ctx: commandCtx });
     if (command.handled) {
       await channel.sendText(chatId, command.reply || '已处理');
+      if (text.trim().toLowerCase().startsWith('/model') || text.trim().toLowerCase().startsWith('/new')) {
+        syncModels({ force: true }).catch(() => {});
+      }
       return { handled: true };
     }
 
@@ -332,6 +353,13 @@ async function bootstrap() {
     proactiveTick().catch((error) => logger.debug?.('生物钟 tick 失败：', error?.message || error));
   }, 30000).unref();
 
+  // 模型实时同步：有面板打开或工作台已连接时，静默轮询当前模型与列表变化并走 SSE 推送
+  setInterval(() => {
+    if (sseClients.size > 0 || workbench.connected) {
+      syncModels({ force: true }).catch(() => {});
+    }
+  }, 4000).unref();
+
   // 定时补发超时任务
   setInterval(() => {
     harness.flushDeferred(async (item, answer) => {
@@ -350,6 +378,7 @@ async function bootstrap() {
 
 const FAILURE_HINTS = {
   timeout: '⌛ 还在跑，跑完我会自动补发给你。',
+  'connect：': '💤 Antigravity 还没准备好：已尝试自动打开客户端，请等窗口加载完再发一次。如果窗口没出现，手动启动 Antigravity 后再试。',
   'submit：fill-failed': '⚠️ 文字没能确认进到输入框（界面在重渲染或被弹窗挡住），已停止发送，不会把你的草稿混进去。再发一次通常就好；持续失败请把 Antigravity 窗口切到对话页。',
   'submit：composer-busy': '⚠️ Antigravity 输入框里有清不掉的内容（多半是你自己未发送的草稿），为免把它一起提交，这次没有发送。请清空输入框后再发一次。',
   'submit：no-input': '⚠️ 当前界面没有输入框——请先切到一个对话（不是首页/设置页），再发一次。',
@@ -419,14 +448,15 @@ async function workbenchStatus() {
   if (workbench.connected) {
     return { connected: true, port: workbench.port, title: workbench.target?.title || '' };
   }
-  const found = await discoverWorkbench();
+  const found = await discoverWorkbench({ waitMs: 800 });
   if (!found.ok) {
-    return {
-      connected: false,
-      port: found.port || 0,
-      title: '',
-      reason: found.reason === 'no-port-file' ? '没找到 DevToolsActivePort（Antigravity 未开远程调试）' : '端口在，但没找到工作台页面',
-    };
+    const reason =
+      found.reason === 'no-port-file'
+        ? '没找到 DevToolsActivePort（Antigravity 未启动或调试端口未开）'
+        : found.reason === 'browser-down'
+          ? `CDP 端口 ${found.port} 无响应（Antigravity 没在运行，端口文件是上次留下的）`
+          : '端口在，但工作台页面还没就绪';
+    return { connected: false, port: found.port || 0, title: '', reason };
   }
   return { connected: false, port: found.port, title: found.target.title || '', ready: true, reason: '可连接（首次发送时自动建立）' };
 }
@@ -624,6 +654,72 @@ function serveStatic(res, file) {
   }
 }
 
+function serveAsset(res, file) {
+  const base = path.join(PLUGIN_ROOT, 'assets');
+  const full = path.join(base, file);
+  if (!full.startsWith(base)) return json(res, 403, { ok: false });
+  try {
+    const data = fs.readFileSync(full);
+    const type = file.endsWith('.png') ? 'image/png' : file.endsWith('.svg') ? 'image/svg+xml' : 'image/jpeg';
+    res.writeHead(200, {
+      'content-type': type,
+      'cache-control': 'public, max-age=3600',
+    });
+    res.end(data);
+  } catch {
+    json(res, 404, { ok: false, error: 'not found' });
+  }
+}
+
+let lastModelsSig = '';
+let lastModelsSnapshot = null;
+
+function modelsSignature(payload) {
+  return JSON.stringify([
+    Boolean(payload?.ok),
+    payload?.current || '',
+    payload?.items || [],
+    (payload?.models || []).map((m) => (typeof m.quota === 'number' ? Math.round(m.quota * 100) : null)),
+    payload?.error || '',
+  ]);
+}
+
+async function syncModels({ force = false, broadcastChange = true } = {}) {
+  let payload;
+  try {
+    const info = await workbench.listModels({ force });
+    payload = {
+      ok: Boolean(info.ok),
+      current: info.current || '',
+      currentRaw: info.currentRaw || info.current || '',
+      items: info.items || [],
+      models: info.models || [],
+      source: info.source || '',
+      updatedAt: info.updatedAt || Date.now(),
+      error: info.ok ? '' : info.reason || '读不到模型列表',
+    };
+  } catch (error) {
+    payload = {
+      ok: false,
+      current: '',
+      currentRaw: '',
+      items: [],
+      models: [],
+      source: '',
+      updatedAt: Date.now(),
+      error: error?.message || String(error),
+    };
+  }
+  const sig = modelsSignature(payload);
+  const changed = sig !== lastModelsSig;
+  lastModelsSig = sig;
+  lastModelsSnapshot = payload;
+  if (changed && broadcastChange && sseClients.size > 0) {
+    broadcast('models', payload);
+  }
+  return payload;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -631,6 +727,9 @@ const server = http.createServer(async (req, res) => {
   try {
     if (pathname === '/ui/panel.html' || pathname === '/ui/panel.css' || pathname === '/ui/panel.js') {
       return serveStatic(res, pathname.split('/').pop());
+    }
+    if (pathname === '/assets/logo.png') {
+      return serveAsset(res, 'logo.png');
     }
     if (pathname === '/' || pathname === '/ui') {
       res.writeHead(302, { location: '/ui/panel.html' });
@@ -811,18 +910,28 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true, items: [...map.values()] });
     }
 
-    if (pathname === '/api/models') {
-      // 面板的模型下拉就吃这个接口：列表直接来自 Antigravity 的模型菜单
+    if (pathname === '/api/models' && req.method === 'GET') {
+      // 实时从 Antigravity LanguageServer / 工作台同步模型列表与当前选中模型
+      const payload = await syncModels({ force: url.searchParams.get('force') === '1', broadcastChange: true });
+      return json(res, 200, payload);
+    }
+
+    if (pathname === '/api/models/select' && req.method === 'POST') {
+      const body = await readBody(req);
+      const model = String(body.model || '').trim();
+      if (!model) return json(res, 400, { ok: false, error: 'model 必填' });
       try {
-        const info = await workbench.listModels({ force: url.searchParams.get('force') === '1' });
+        const picked = await workbench.selectModel(model);
+        const snapshot = await syncModels({ force: true, broadcastChange: true });
         return json(res, 200, {
-          ok: Boolean(info.ok),
-          current: info.current || '',
-          items: info.items || [],
-          error: info.ok ? '' : info.reason || '读不到模型菜单',
+          ok: Boolean(picked.ok),
+          current: picked.current || snapshot.current || '',
+          picked: model,
+          error: picked.ok ? '' : picked.reason || '切换模型失败',
+          snapshot,
         });
       } catch (error) {
-        return json(res, 200, { ok: false, current: '', items: [], error: error?.message || String(error) });
+        return json(res, 200, { ok: false, error: error?.message || String(error) });
       }
     }
 
@@ -1091,6 +1200,10 @@ const server = http.createServer(async (req, res) => {
       });
       res.write(': connected\n\n');
       sseClients.add(res);
+      if (lastModelsSnapshot) {
+        res.write(`event: models\ndata: ${JSON.stringify(lastModelsSnapshot)}\n\n`);
+      }
+      syncModels({ force: true, broadcastChange: true }).catch(() => {});
       req.on('close', () => sseClients.delete(res));
       return undefined;
     }
@@ -1102,6 +1215,52 @@ const server = http.createServer(async (req, res) => {
     logger.error('HTTP 处理异常：', error?.message || error);
     return json(res, 500, { ok: false, error: error?.message || String(error) });
   }
+});
+
+// 一个端口只允许一个 hub：开机自启 + Antigravity sidecar 同时拉起时，
+// 后来的实例要待命而不是每分钟崩一次；旧实例卡死时才尝试接管。
+async function probeExistingHub() {
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return false;
+    const body = await res.json().catch(() => null);
+    return Boolean(body?.ok);
+  } catch {
+    return false;
+  }
+}
+
+let standbyTimer = null;
+let standbyRetrying = false;
+
+server.on('error', async (error) => {
+  if (error?.code !== 'EADDRINUSE') {
+    logger.error('HTTP 服务启动失败：', error?.message || error);
+    process.exit(1);
+  }
+  // 已在待命就不要因为一次探活超时（hub 正在做同步 IO）误判而退出
+  if (standbyTimer) return;
+  if (await probeExistingHub()) {
+    logger.warn(`端口 ${PORT} 已有守护进程在服务，本实例待命（不重复启动）`);
+    standbyTimer = setInterval(async () => {
+      if (standbyRetrying || (await probeExistingHub())) return;
+      standbyRetrying = true;
+      logger.warn('现有守护进程无响应，尝试接管端口…');
+      try {
+        server.listen(PORT, HOST);
+      } catch {
+        /* 下一轮再试 */
+      }
+      setTimeout(() => {
+        standbyRetrying = false;
+      }, 3000);
+    }, 15_000);
+    // 不能 unref：没有 listening server 时它就是唯一的存活句柄，
+    // 一退出 sidecar 管理器又会每分钟重启一次（历史上 2950 次崩溃循环就是这么来的）
+    return;
+  }
+  logger.error(`端口 ${PORT} 被占用且现有实例无响应（可能是卡死的旧进程），无法启动 HTTP 服务`);
+  process.exit(1);
 });
 
 server.listen(PORT, HOST, async () => {
@@ -1119,6 +1278,7 @@ function shutdown() {
   sessionSync.stop();
   injector.stop();
   for (const channel of channels.values()) channel.stop?.();
+  state.flushDirty?.();
   workbench.close();
   server.close();
   process.exit(0);

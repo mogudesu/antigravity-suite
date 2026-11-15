@@ -185,6 +185,7 @@ export function buildScript(panelUrl) {
     return true;
   }
 
+  window.__AGB_URL__ = URL;
   window.__AGB__ = {
     ensure,
     open() {
@@ -226,19 +227,40 @@ export class SettingsInjector {
     this.timer = null;
   }
 
-  async ensure() {
-    try {
-      const client = await this.workbench.ensure();
-      await client.evaluate('window.__AGB_DISABLED__ = false');
-      return await client.evaluate(buildScript(this.panelUrl));
-    } catch (error) {
-      this.logger.debug?.('注入失败：', error?.message || error);
-      return { ok: false, error: error?.message || String(error) };
-    }
+  async ensure({ force = false } = {}) {
+    if (this._ensuring) return this._ensuring;
+    this._ensuring = (async () => {
+      try {
+        const client = await this.workbench.ensure();
+        if (!force) {
+          const probe = await client.evaluate(`(() => {
+            if (window.__AGB_DISABLED__) return { ok: true, disabled: true, skip: true };
+            if (window.__AGB__ && window.__AGB_URL__ === ${JSON.stringify(this.panelUrl)}) {
+              const st = window.__AGB__.status();
+              if (!st.dialog || st.injected) return Object.assign({ ok: true, reused: true }, st);
+            }
+            return null;
+          })()`);
+          if (probe && (probe.skip || probe.reused)) {
+            return probe;
+          }
+        }
+        if (force) {
+          await client.evaluate('window.__AGB_DISABLED__ = false');
+        }
+        return await client.evaluate(buildScript(this.panelUrl));
+      } catch (error) {
+        this.logger.debug?.('注入失败：', error?.message || error);
+        return { ok: false, error: error?.message || String(error) };
+      } finally {
+        this._ensuring = null;
+      }
+    })();
+    return this._ensuring;
   }
 
   async openPanel() {
-    await this.ensure();
+    await this.ensure({ force: true });
     try {
       const client = await this.workbench.ensure();
       await client.evaluate('window.__AGB__ && window.__AGB__.open()');

@@ -12,8 +12,8 @@ A skill is a `SKILL.md` file the agent loads on demand. Mnemon keeps the evidenc
 
 ## 1. Gather the evidence
 
-1. `mnemon_memory_candidate_list` and `mnemon_memory_search` for corrections and standing instructions.
-2. `mnemon_memory_receipts` to see which skills and memories recent turns actually used.
+1. `memory_manage` (`action: "candidates"`, `candidateAction: "list"`) and `memory_recall` (`action: "search"`) for corrections and standing instructions.
+2. `memory_recall` (`action: "receipts"`) to see which skills and memories recent turns actually used.
 3. Name the skill under review, and read it: `skills/<name>/SKILL.md` in this workspace or in the home folder.
 
 ## 2. Decide whether a skill is the right answer
@@ -40,4 +40,4 @@ Show the diff and the backtest. Change nothing until the user adopts it. On adop
 
 1. Write the new `SKILL.md`.
 2. Keep the previous wording as a revision, or in a memory tagged `skill-history`, so the change can be reverted.
-3. Record what changed with `mnemon_memory_save`, so the reason survives the next session.
+3. Record what changed with `memory_save` (`action: "remember"`), so the reason survives the next session.

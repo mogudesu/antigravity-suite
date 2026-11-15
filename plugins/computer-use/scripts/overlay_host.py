@@ -107,14 +107,19 @@ WDA_EXCLUDEFROMCAPTURE = 0x00000011
 
 
 def capture_guard_enabled():
-    """Opt-in: hide the overlay from GDI/remote captures via WDA.
+    """Hide the overlay from GDI/BitBlt captures via WDA_EXCLUDEFROMCAPTURE.
 
-    The default is off because the user may be watching through a remote
-    desktop or screen-sharing tool, which is itself a capture. Enabling the
-    guard makes the cursor/banner invisible to those viewers.
+    Enabled by default so screenshots sent to the model never capture the cyan
+    control border or cursor. Set CU_OVERLAY_CAPTURE_GUARD=0 (or
+    CU_CAPTURE_OVERLAY=1) when recording via screen-share that must see it.
     """
+    capture_override = str(os.environ.get("CU_CAPTURE_OVERLAY", "")).strip().lower()
+    if capture_override in ("1", "true", "on", "yes", "enabled"):
+        return False
     raw = str(os.environ.get("CU_OVERLAY_CAPTURE_GUARD", "")).strip().lower()
-    return raw in ("1", "true", "on", "yes", "enabled")
+    if raw in ("0", "false", "off", "no", "disabled"):
+        return False
+    return True
 kernel32.OpenProcess.restype = wintypes.HANDLE
 
 _GetWindowLongPtr = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
@@ -423,12 +428,20 @@ class Layer:
                     ctypes.c_void_p(exstyle(handle) & ~WS_EX_LAYERED),
                 )
 
-    def place(self, x, y):
+    def place(self, x, y, width=None, height=None):
         x = int(x)
         y = int(y)
-        if self._position == (x, y):
-            return
+        new_w = self.width if width is None else max(1, int(width))
+        new_h = self.height if height is None else max(1, int(height))
+        if self._position == (x, y) and new_w == self.width and new_h == self.height:
+            return False
+        resized = (new_w != self.width or new_h != self.height)
+        self.width = new_w
+        self.height = new_h
         self._position = (x, y)
+        if resized:
+            self.window.geometry("%dx%d+%d+%d" % (self.width, self.height, x, y))
+            self.canvas.configure(width=self.width, height=self.height)
         user32.SetWindowPos(
             self.hwnd,
             HWND_TOPMOST,
@@ -438,6 +451,7 @@ class Layer:
             self.height,
             SWP_NOACTIVATE | SWP_NOOWNERZORDER,
         )
+        return resized
 
     def raise_topmost(self):
         user32.SetWindowPos(
@@ -523,9 +537,9 @@ class OverlayApp:
         self.banner_width = max(190, self.text_width + 58)
         self.banner_height = 42
 
-        vx, vy, vw, vh = virtual_screen()
-        self.screen = Layer(self.root, "CuOverlayScreen", vw, vh)
-        self.screen.place(vx, vy)
+        mx, my, mw, mh = self.monitor
+        self.screen = Layer(self.root, "CuOverlayScreen", mw, mh)
+        self.screen.place(mx, my)
         self._draw_screen()
         self.cursor = Layer(self.root, "CuOverlayCursor", CURSOR_WINDOW, CURSOR_WINDOW)
         self.banner = Layer(
@@ -625,6 +639,7 @@ class OverlayApp:
 
     def _draw_screen(self):
         canvas = self.screen.canvas
+        canvas.delete("all")
         width = self.screen.width
         height = self.screen.height
         # A Codex-style screen highlight: a translucent framed halo hugging
@@ -840,7 +855,14 @@ class OverlayApp:
 
     def _position(self, now):
         x, y = self.point
-        self.monitor = monitor_rect(x, y)
+        target_mon = monitor_rect(x, y)
+        if target_mon != self.monitor:
+            self.monitor = target_mon
+            mx, my, mw, mh = target_mon
+            if self.screen.place(mx, my, mw, mh):
+                self._draw_screen()
+        else:
+            self.monitor = target_mon
         bx, by, placement = banner_placement(
             self.monitor, (self.banner_width, self.banner_height), (x, y)
         )

@@ -1,22 +1,149 @@
 (() => {
   'use strict';
 
-  const UI_VERSION = '5.0.0';
-  // 同一页面只允许一套实例：重复注入会叠加捕获监听器，面板会一开一合。
-  // 热更新代码请刷新页面，而不是换版本重新注入。
-  if (window.__agExtendedUiInstalled) {
-    window.__agUiDisabled = false;
-    if (window.__agExtendedUiRefresh) window.__agExtendedUiRefresh();
-    return;
+  const UI_VERSION = '5.3.0';
+  // 同一页面只允许一套实例：相同版本复用并刷新；版本升级时先释放旧实例再热装载。
+  const prevInstalled = Boolean(window.__agExtendedUiInstalled);
+  const prevVersion = String(window.__agExtendedUiVersion || '');
+  const prevHadCleanLifecycle = Boolean(window.__agUiCleanLifecycle);
+  if (prevInstalled) {
+    if (prevVersion === UI_VERSION && prevHadCleanLifecycle) {
+      window.__agUiDisabled = false;
+      if (window.__agExtendedUiRefresh) window.__agExtendedUiRefresh();
+      return;
+    }
+    if (!prevHadCleanLifecycle) {
+      window.__agDirtyDocument = true;
+    }
+    if (typeof window.__agUiDispose === 'function') {
+      try { window.__agUiDispose(); } catch (error) {}
+    }
   }
   window.__agExtendedUiInstalled = true;
   window.__agExtendedUiVersion = UI_VERSION;
   window.__agUiDisabled = false;
+  window.__agUiCleanLifecycle = true;
 
-  const PLUGINS = Array.isArray(window.__AG_INSTALLED_PLUGINS) ? window.__AG_INSTALLED_PLUGINS : [];
+  const lifecycle = {
+    listeners: [],
+    timeouts: new Set(),
+    intervals: new Set(),
+    controllers: new Set(),
+    cleanups: [],
+    disposed: false,
+    addListener(target, type, fn, options) {
+      if (!target || typeof target.addEventListener !== 'function' || this.disposed) return () => {};
+      target.addEventListener(type, fn, options);
+      const capture = typeof options === 'boolean' ? options : Boolean(options && options.capture);
+      const entry = { target, type, fn, capture };
+      this.listeners.push(entry);
+      return () => {
+        try { target.removeEventListener(type, fn, capture); } catch (error) {}
+        const idx = this.listeners.indexOf(entry);
+        if (idx !== -1) this.listeners.splice(idx, 1);
+      };
+    },
+    setTimeout(fn, ms) {
+      if (this.disposed) return 0;
+      const id = window.setTimeout(() => {
+        this.timeouts.delete(id);
+        if (!this.disposed && !window.__agUiDisabled) fn();
+      }, ms);
+      this.timeouts.add(id);
+      return id;
+    },
+    clearTimeout(id) {
+      if (!id) return;
+      this.timeouts.delete(id);
+      window.clearTimeout(id);
+    },
+    setInterval(fn, ms) {
+      if (this.disposed) return 0;
+      const id = window.setInterval(() => {
+        if (!this.disposed && !window.__agUiDisabled) fn();
+      }, ms);
+      this.intervals.add(id);
+      return id;
+    },
+    clearInterval(id) {
+      if (!id) return;
+      this.intervals.delete(id);
+      window.clearInterval(id);
+    },
+    trackAbort(parentSignal) {
+      const controller = new AbortController();
+      if (this.disposed) {
+        try { controller.abort(); } catch (error) {}
+        return controller;
+      }
+      this.controllers.add(controller);
+      if (parentSignal) {
+        if (parentSignal.aborted) controller.abort();
+        else parentSignal.addEventListener('abort', () => controller.abort(), { once: true });
+      }
+      return controller;
+    },
+    releaseAbort(controller) {
+      if (controller) this.controllers.delete(controller);
+    },
+    onDispose(fn) {
+      if (typeof fn === 'function') this.cleanups.push(fn);
+    },
+    disposeAll() {
+      if (this.disposed) return;
+      this.disposed = true;
+      for (const entry of this.listeners.splice(0)) {
+        try { entry.target.removeEventListener(entry.type, entry.fn, entry.capture); } catch (error) {}
+      }
+      for (const id of this.timeouts) {
+        try { window.clearTimeout(id); } catch (error) {}
+      }
+      this.timeouts.clear();
+      for (const id of this.intervals) {
+        try { window.clearInterval(id); } catch (error) {}
+      }
+      this.intervals.clear();
+      for (const ctrl of this.controllers) {
+        try { ctrl.abort(); } catch (error) {}
+      }
+      this.controllers.clear();
+      for (const fn of this.cleanups.splice(0)) {
+        try { fn(); } catch (error) {}
+      }
+    }
+  };
+  window.__agUiLifecycleStats = () => ({
+    version: UI_VERSION,
+    cleanLifecycle: Boolean(window.__agUiCleanLifecycle),
+    dirtyDocument: Boolean(window.__agDirtyDocument),
+    listeners: lifecycle.listeners.length,
+    timeouts: lifecycle.timeouts.size,
+    intervals: lifecycle.intervals.size,
+    controllers: lifecycle.controllers.size,
+    disposed: lifecycle.disposed
+  });
+
+  let PLUGINS = Array.isArray(window.__AG_INSTALLED_PLUGINS) ? window.__AG_INSTALLED_PLUGINS.slice() : [];
   const USAGE_ENDPOINTS = Array.isArray(window.__AG_USAGE_ENDPOINTS) ? window.__AG_USAGE_ENDPOINTS : [];
-  const EFFORTS = ['Low', 'Medium', 'High'];
-  const EFFORT_LABELS = { Low: '低', Medium: '中', High: '高' };
+  const EFFORT_CANONICAL = [
+    { key: 'off', rank: 0, label: '关', fullLabel: '关闭', triggerSuffix: 'Off', domText: 'Off', aliases: ['off', 'none', 'disabled', 'close', '关', '关闭', '无'] },
+    { key: 'minimal', rank: 1, label: '极低', fullLabel: '极低', triggerSuffix: 'Minimal', domText: 'Minimal', aliases: ['minimal', 'min', 'lowest', 'verylow', 'very-low', '极低', '最低'] },
+    { key: 'low', rank: 2, label: '低', fullLabel: '低', triggerSuffix: 'Low', domText: 'Low', aliases: ['low', '低'] },
+    { key: 'medium', rank: 3, label: '中', fullLabel: '中', triggerSuffix: 'Medium', domText: 'Medium', aliases: ['medium', 'med', 'normal', 'standard', 'balanced', 'default', '中', '中等', '标准'] },
+    { key: 'high', rank: 4, label: '高', fullLabel: '高', triggerSuffix: 'High', domText: 'High', aliases: ['high', '高'] },
+    { key: 'xhigh', rank: 5, label: '极高', fullLabel: '极高', triggerSuffix: 'Extra', domText: 'XHigh', aliases: ['xhigh', 'x-high', 'extra', 'extrahigh', 'extra-high', 'veryhigh', 'very-high', '极高', '超高'] },
+    { key: 'max', rank: 6, label: '极限', fullLabel: '极限', triggerSuffix: 'Max', domText: 'Max', aliases: ['max', 'ultra', 'maximum', 'highest', '极限', '最大'] }
+  ];
+  const EFFORT_ALIAS_MAP = new Map();
+  const ALL_EFFORT_SUFFIXES = [];
+  EFFORT_CANONICAL.forEach((spec) => {
+    spec.aliases.forEach((alias) => {
+      EFFORT_ALIAS_MAP.set(alias.toLowerCase(), spec);
+      ALL_EFFORT_SUFFIXES.push({ suffix: alias, spec });
+    });
+  });
+  ALL_EFFORT_SUFFIXES.sort((a, b) => b.suffix.length - a.suffix.length);
+  const EFFORT_DEFAULT_KEYS = ['low', 'medium', 'high'];
   const MODEL_COLORS = {
     'gemini-4-argon': '#A5B4FC',
     'gemini-3.8-flash': '#7DD3FC',
@@ -24,7 +151,7 @@
     'claude-sonnet-5-5': '#F0ABFC'
   };
   const PLUGIN_COLORS = ['#A5B4FC', '#7DD3FC', '#FCD34D', '#F0ABFC', '#6EE7B7', '#FCA5A5'];
-  const SKILLS = Array.isArray(window.__AG_SKILLS) ? window.__AG_SKILLS : [];
+  let SKILLS = Array.isArray(window.__AG_SKILLS) ? window.__AG_SKILLS.slice() : [];
   const SIDECAR = 'http://127.0.0.1:' + (window.__AG_SIDECAR_PORT || 39290);
   const DECK_FAVORITES_KEY = 'ag-deck-favorites-v1';
 
@@ -34,11 +161,23 @@
     error: null,
     lastFetch: 0
   };
-  let usageMode = localStorage.getItem('ag-usage-mode') === 'ring' ? 'ring' : 'detail';
+  function safeStorageGet(key) {
+    try {
+      return window.localStorage ? window.localStorage.getItem(key) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+  function safeStorageSet(key, value) {
+    try {
+      if (window.localStorage) window.localStorage.setItem(key, value);
+    } catch (error) {}
+  }
+  let usageMode = safeStorageGet('ag-usage-mode') === 'ring' ? 'ring' : 'detail';
   const SHOW_USAGE_PANEL = true;
   let scanTimer = 0;
   let scanCount = 0;
-  let pluginPanelBound = false;
+  let composerControllerBound = false;
 
   function make(tag, className, text) {
     const node = document.createElement(tag);
@@ -84,10 +223,119 @@
     document.dispatchEvent(new KeyboardEvent('keydown', options));
   }
 
+  let savedComposerCaret = null;
+
+  function getComposerEditor() {
+    const composer = getComposer();
+    if (!composer) return null;
+    return composer.querySelector('[contenteditable="true"], textarea, input[type="text"]');
+  }
+
+  function computeEditorTextOffsets(editor) {
+    if (!editor) return null;
+    if (typeof editor.selectionStart === 'number') {
+      return {
+        editor,
+        isValueControl: true,
+        start: editor.selectionStart,
+        end: editor.selectionEnd ?? editor.selectionStart
+      };
+    }
+    const sel = window.getSelection?.();
+    if (!sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
+    const measureOffset = (node, offset) => {
+      try {
+        const pre = document.createRange();
+        pre.selectNodeContents(editor);
+        pre.setEnd(node, offset);
+        return pre.toString().length;
+      } catch (error) {
+        return null;
+      }
+    };
+    const start = measureOffset(range.startContainer, range.startOffset);
+    const end = measureOffset(range.endContainer, range.endOffset);
+    if (start === null || end === null) return null;
+    return { editor, isValueControl: false, start, end };
+  }
+
+  function captureComposerCaret() {
+    const editor = getComposerEditor();
+    if (!editor) return savedComposerCaret;
+    const current = computeEditorTextOffsets(editor);
+    if (current) savedComposerCaret = current;
+    return savedComposerCaret;
+  }
+
+  function resolveTextPositionAtOffset(root, targetOffset) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let remaining = Math.max(0, Number(targetOffset) || 0);
+    let lastNode = null;
+    let node;
+    while ((node = walker.nextNode())) {
+      lastNode = node;
+      const len = node.nodeValue ? node.nodeValue.length : 0;
+      if (remaining <= len) return { node, offset: remaining };
+      remaining -= len;
+    }
+    if (lastNode) return { node: lastNode, offset: lastNode.nodeValue ? lastNode.nodeValue.length : 0 };
+    return { node: root, offset: root.childNodes.length };
+  }
+
+  function restoreComposerCaret(options = {}) {
+    const editor = getComposerEditor();
+    if (!editor || !document.contains(editor)) return false;
+    if (options.focus !== false) {
+      try { editor.focus({ preventScroll: true }); } catch (error) { editor.focus(); }
+    }
+    if (savedComposerCaret && savedComposerCaret.editor === editor) {
+      if (savedComposerCaret.isValueControl && typeof editor.setSelectionRange === 'function') {
+        try {
+          editor.setSelectionRange(savedComposerCaret.start, savedComposerCaret.end);
+          return true;
+        } catch (error) {}
+      } else {
+        try {
+          const sel = window.getSelection?.();
+          if (sel) {
+            const startPos = resolveTextPositionAtOffset(editor, savedComposerCaret.start);
+            const endPos = resolveTextPositionAtOffset(editor, savedComposerCaret.end);
+            const range = document.createRange();
+            range.setStart(startPos.node, startPos.offset);
+            range.setEnd(endPos.node, endPos.offset);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return true;
+          }
+        } catch (error) {}
+      }
+    }
+    return false;
+  }
+
   function insertComposerText(text) {
     const composer = getComposer();
-    const editor = composer ? composer.querySelector('[contenteditable="true"]') : null;
+    const editor = composer ? composer.querySelector('[contenteditable="true"], textarea') : null;
     if (!editor) return false;
+    const valueText = String(text || '');
+
+    if (typeof editor.value === 'string' && typeof editor.selectionStart === 'number') {
+      const start = savedComposerCaret?.editor === editor ? savedComposerCaret.start : editor.selectionStart;
+      const end = savedComposerCaret?.editor === editor ? savedComposerCaret.end : editor.selectionEnd;
+      const before = editor.value.slice(0, start);
+      const after = editor.value.slice(end);
+      editor.value = before + valueText + after;
+      const nextCaret = before.length + valueText.length;
+      try {
+        editor.focus({ preventScroll: true });
+        editor.setSelectionRange(nextCaret, nextCaret);
+      } catch (error) {}
+      savedComposerCaret = { editor, isValueControl: true, start: nextCaret, end: nextCaret };
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    }
 
     const lexical = editor.__lexicalEditor;
     if (lexical && lexical._nodes && typeof lexical.update === 'function') {
@@ -100,7 +348,7 @@
             const root = lexical._pendingEditorState._nodeMap.get('root');
             if (!root) return;
             const paragraph = new ParagraphNode();
-            String(text).split('\n').forEach((line, index) => {
+            valueText.split('\n').forEach((line, index) => {
               if (index > 0 && LineBreakNode) paragraph.append(new LineBreakNode());
               if (line) paragraph.append(new TextNode(line));
             });
@@ -111,6 +359,7 @@
           try {
             editor.dispatchEvent(new Event('input', { bubbles: true }));
           } catch (error) {}
+          captureComposerCaret();
           return true;
         }
       } catch (error) {
@@ -118,21 +367,81 @@
       }
     }
 
-    editor.focus();
-    try {
-      const transfer = new DataTransfer();
-      transfer.setData('text/plain', text);
-      editor.dispatchEvent(new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: transfer
-      }));
-      return true;
-    } catch (error) {
-      console.warn('[Wallpaper] Failed to insert prompt:', error);
-      return false;
+    try { editor.focus({ preventScroll: true }); } catch (error) { editor.focus(); }
+    const restored = restoreComposerCaret({ focus: false });
+    const sel = window.getSelection?.();
+    if (!restored && sel) {
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (error) {}
     }
+
+    const beforeText = editor.textContent || '';
+    let insertedByCommand = false;
+    try {
+      if (typeof document.execCommand === 'function') {
+        insertedByCommand = Boolean(document.execCommand('insertText', false, valueText));
+      }
+    } catch (error) {}
+    if (!insertedByCommand || ((editor.textContent || '') === beforeText && valueText.length > 0)) {
+      try {
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const textNode = document.createTextNode(valueText);
+          range.insertNode(textNode);
+          range.setStartAfter(textNode);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          editor.appendChild(document.createTextNode(valueText));
+        }
+      } catch (error) {
+        editor.textContent = beforeText + valueText;
+      }
+    }
+    try {
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (error) {}
+    captureComposerCaret();
+    return true;
   }
+
+  window.__agRestoreReloadDraft = function () {
+    try {
+      const raw = window.sessionStorage?.getItem('ag-reload-draft-backup-v1');
+      if (!raw) return false;
+      const backup = JSON.parse(raw);
+      if (!backup || backup.path !== location.pathname || Date.now() - (Number(backup.savedAt) || 0) > 120000) {
+        window.sessionStorage?.removeItem('ag-reload-draft-backup-v1');
+        return false;
+      }
+      const editor = getComposerEditor();
+      if (!editor) return false;
+      const existing = typeof editor.value === 'string' ? editor.value : (editor.innerText || '');
+      if (existing.trim()) {
+        window.sessionStorage?.removeItem('ag-reload-draft-backup-v1');
+        return false;
+      }
+      window.sessionStorage?.removeItem('ag-reload-draft-backup-v1');
+      if (backup.lexicalJson && editor.__lexicalEditor?.parseEditorState && editor.__lexicalEditor?.setEditorState) {
+        try {
+          const parsed = editor.__lexicalEditor.parseEditorState(backup.lexicalJson);
+          editor.__lexicalEditor.setEditorState(parsed);
+          return true;
+        } catch (error) {}
+      }
+      if (backup.text && backup.text.trim()) {
+        return insertComposerText(backup.text);
+      }
+    } catch (error) {}
+    return false;
+  };
 
   function replaceComposerText(text) {
     const composer = getComposer();
@@ -189,22 +498,252 @@
     return insertComposerText(text);
   }
 
+  function normalizeEffortSpec(rawKey, optionLabel, optionObj, fallbackOrder = 0) {
+    const raw = String(rawKey || '').trim();
+    const cleaned = raw.toLowerCase().replace(/[\s_()]+/g, '');
+    let spec = EFFORT_ALIAS_MAP.get(raw.toLowerCase()) || EFFORT_ALIAS_MAP.get(cleaned);
+    if (!spec && optionLabel) {
+      const paren = String(optionLabel).match(/\(([^)]+)\)\s*$/);
+      if (paren) {
+        const inner = paren[1].trim().toLowerCase();
+        spec = EFFORT_ALIAS_MAP.get(inner) || EFFORT_ALIAS_MAP.get(inner.replace(/[\s_-]+/g, ''));
+      }
+    }
+    if (spec) {
+      return {
+        key: spec.key,
+        rank: spec.rank,
+        label: spec.label,
+        fullLabel: spec.fullLabel,
+        rawKey: raw || spec.key,
+        domText: spec.domText,
+        triggerSuffix: spec.triggerSuffix,
+        option: optionObj || null
+      };
+    }
+    const short = raw ? raw.slice(0, 4) : ('T' + (fallbackOrder + 1));
+    return {
+      key: raw.toLowerCase() || ('tier_' + fallbackOrder),
+      rank: 100 + fallbackOrder,
+      label: short,
+      fullLabel: raw || short,
+      rawKey: raw || short,
+      domText: raw || short,
+      triggerSuffix: raw || short,
+      option: optionObj || null
+    };
+  }
+
+  function parseModelLabelSuffix(label) {
+    const text = String(label || '').trim();
+    if (!text) return null;
+    const paren = text.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+    if (paren) {
+      const spec = normalizeEffortSpec(paren[2]);
+      if (EFFORT_ALIAS_MAP.has(paren[2].trim().toLowerCase()) || EFFORT_ALIAS_MAP.has(paren[2].trim().toLowerCase().replace(/[\s_-]+/g, ''))) {
+        return { base: paren[1].trim(), spec };
+      }
+    }
+    const lower = text.toLowerCase();
+    for (const item of ALL_EFFORT_SUFFIXES) {
+      const s = item.suffix.toLowerCase();
+      if (lower.endsWith(' ' + s) || lower.endsWith('-' + s) || lower.endsWith('_' + s)) {
+        return {
+          base: text.slice(0, text.length - item.suffix.length - 1).trim(),
+          spec: normalizeEffortSpec(item.spec.key)
+        };
+      }
+    }
+    return null;
+  }
+
+  function getModelContext() {
+    const trigger = getModelTrigger();
+    if (!trigger) return null;
+    const keys = Object.keys(trigger);
+    const fiberKey = keys.find((k) => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+    if (!fiberKey) return null;
+    let fiber = trigger[fiberKey];
+    for (let depth = 0; fiber && depth < 40; depth += 1) {
+      const val = fiber.memoizedProps && fiber.memoizedProps.value;
+      if (val && typeof val === 'object' && val.effortIndex && typeof val.effortIndex.get === 'function' && typeof val.setSelectedModel === 'function') {
+        return val;
+      }
+      fiber = fiber.return;
+    }
+    return null;
+  }
+
+  function optionMatchesSelected(opt, selected) {
+    if (!opt || !selected) return false;
+    if (opt === selected) return true;
+    if (selected.modelId && opt.modelId && opt.modelId === selected.modelId) return true;
+    if (selected.value !== undefined && opt.value !== undefined && opt.value === selected.value) return true;
+    if (selected.label && opt.label && opt.label === selected.label) return true;
+    return false;
+  }
+
+  function buildTiersFromMap(tierMap) {
+    const seen = new Set();
+    const list = [];
+    let order = 0;
+    for (const [rawKey, opt] of tierMap.entries()) {
+      if (opt && opt.disabled) continue;
+      const tier = normalizeEffortSpec(rawKey, opt && opt.label, opt, order++);
+      if (!seen.has(tier.key)) {
+        seen.add(tier.key);
+        list.push(tier);
+      }
+    }
+    list.sort((a, b) => a.rank - b.rank);
+    return list;
+  }
+
+  function getDomDeclaredTiers(trigger, base, parsedSpec) {
+    const attr = trigger?.dataset?.agEffortTiers;
+    if (attr) {
+      const rawList = attr.split(',').map((s) => s.trim()).filter(Boolean);
+      const list = rawList.map((raw, i) => normalizeEffortSpec(raw, '', null, i));
+      if (list.length) return list.sort((a, b) => a.rank - b.rank);
+    }
+    const visibleMenu = getVisibleMenus().find((node) => node.querySelector('[data-testid="model-selector-panel"]'));
+    if (visibleMenu) {
+      const subOptions = Array.from(document.querySelectorAll('[data-testid="model-selector-effort-option"]'));
+      if (subOptions.length) {
+        const mapped = [];
+        const seen = new Set();
+        subOptions.forEach((node, idx) => {
+          const val = node.dataset.effort || node.textContent;
+          const spec = normalizeEffortSpec(val, '', null, idx);
+          if (!seen.has(spec.key)) {
+            seen.add(spec.key);
+            mapped.push(spec);
+          }
+        });
+        if (mapped.length) return mapped.sort((a, b) => a.rank - b.rank);
+      }
+    }
+    const keys = parsedSpec && parsedSpec.key === 'xhigh'
+      ? ['low', 'medium', 'high', 'xhigh']
+      : (parsedSpec && parsedSpec.key === 'minimal'
+        ? ['minimal', 'low', 'medium', 'high']
+        : EFFORT_DEFAULT_KEYS.slice());
+    if (parsedSpec && !keys.includes(parsedSpec.key)) keys.push(parsedSpec.key);
+    return keys.map((k, idx) => normalizeEffortSpec(k, '', null, idx)).sort((a, b) => a.rank - b.rank);
+  }
+
   function modelBaseFromTrigger() {
     const trigger = getModelTrigger();
     if (!trigger) return null;
     const aria = trigger.getAttribute('aria-label') || '';
-    const label = (aria.split('current:')[1] || trigger.innerText || '').trim();
-    const effort = EFFORTS.find((item) => label.endsWith(' ' + item));
-    if (!effort) return null;
+    const domLabel = (aria.split('current:')[1] || trigger.innerText || '').trim();
+
+    const ctx = getModelContext();
+    if (ctx && ctx.effortIndex && ctx.selectedModel) {
+      const sel = ctx.selectedModel;
+      let matchedBase = '';
+      let matchedMap = null;
+      for (const [base, tierMap] of ctx.effortIndex.entries()) {
+        if (!(tierMap && typeof tierMap.entries === 'function')) continue;
+        for (const [, opt] of tierMap.entries()) {
+          if (optionMatchesSelected(opt, sel)) {
+            matchedBase = base;
+            matchedMap = tierMap;
+            break;
+          }
+        }
+        if (matchedMap) break;
+      }
+      if (!matchedMap) {
+        const parsedSel = parseModelLabelSuffix(sel.label || domLabel);
+        if (parsedSel && ctx.effortIndex.has(parsedSel.base)) {
+          matchedBase = parsedSel.base;
+          matchedMap = ctx.effortIndex.get(parsedSel.base);
+        }
+      }
+      if (matchedMap) {
+        const tiers = buildTiersFromMap(matchedMap);
+        if (!tiers.length) return null;
+        let idx = tiers.findIndex((t) => optionMatchesSelected(t.option, sel));
+        if (idx < 0) {
+          const parsed = parseModelLabelSuffix(sel.label || domLabel);
+          if (parsed) idx = tiers.findIndex((t) => t.key === parsed.spec.key);
+        }
+        if (idx < 0) idx = 0;
+        const current = tiers[idx];
+        return {
+          label: domLabel || sel.label || '',
+          base: matchedBase,
+          tiers,
+          index: idx,
+          current,
+          effort: current.rawKey,
+          fixed: tiers.length <= 1,
+          source: 'fiber',
+          ctx
+        };
+      }
+    }
+
+    const parsed = parseModelLabelSuffix(domLabel);
+    if (!parsed) return null;
+    const tiers = getDomDeclaredTiers(trigger, parsed.base, parsed.spec);
+    if (!tiers.length) return null;
+    let idx = tiers.findIndex((t) => t.key === parsed.spec.key);
+    if (idx < 0) {
+      tiers.push(parsed.spec);
+      tiers.sort((a, b) => a.rank - b.rank);
+      idx = tiers.findIndex((t) => t.key === parsed.spec.key);
+    }
+    const current = tiers[idx];
     return {
-      label,
-      base: label.slice(0, -(effort.length + 1)).trim(),
-      effort,
-      index: EFFORTS.indexOf(effort)
+      label: domLabel,
+      base: parsed.base,
+      tiers,
+      index: idx,
+      current,
+      effort: current.rawKey,
+      fixed: tiers.length <= 1,
+      source: 'dom',
+      ctx: null
     };
   }
 
-  async function applyEffort(level, base) {
+  function findEffortOptionElement(submenu, tier) {
+    if (!submenu || !tier) return null;
+    const candidates = [tier.key, tier.rawKey, tier.triggerSuffix, tier.domText]
+      .filter(Boolean)
+      .map((v) => String(v).toLowerCase());
+    const dataMatches = Array.from(submenu.querySelectorAll('[data-testid="model-selector-effort-option"]'));
+    const byData = dataMatches.find((node) => {
+      const attr = String(node.dataset.effort || '').toLowerCase();
+      return candidates.includes(attr) || normalizeEffortSpec(attr).key === tier.key;
+    });
+    if (byData) return byData.closest('[role="menuitem"], [role="menuitemradio"]') || byData;
+    return Array.from(submenu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]')).find((item) => {
+      const txt = (item.textContent || '').trim();
+      return txt && normalizeEffortSpec(txt).key === tier.key;
+    }) || null;
+  }
+
+  async function applyEffort(levelOrTier, base) {
+    const targetTier = typeof levelOrTier === 'object' && levelOrTier !== null
+      ? levelOrTier
+      : normalizeEffortSpec(levelOrTier);
+    const ctx = getModelContext();
+    if (ctx && ctx.effortIndex && typeof ctx.setSelectedModel === 'function') {
+      const tierMap = ctx.effortIndex.get(base);
+      if (tierMap) {
+        const tiers = buildTiersFromMap(tierMap);
+        const match = tiers.find((t) => t.key === targetTier.key) ||
+          tiers.reduce((best, t) => (!best || Math.abs(t.rank - targetTier.rank) < Math.abs(best.rank - targetTier.rank) ? t : best), null);
+        if (match && match.option) {
+          ctx.setSelectedModel(match.option);
+          return true;
+        }
+      }
+    }
+
     const menu = getVisibleMenus().find((node) => node.querySelector('[data-testid="model-selector-panel"]'));
     if (!menu) return false;
 
@@ -256,8 +795,7 @@
     if (!submenu) {
       submenu = getVisibleMenus().find((node) => {
         if (node === menu) return false;
-        return Array.from(node.querySelectorAll('[role="menuitem"], [role="menuitemradio"]'))
-          .some((item) => (item.textContent || '').trim() === level);
+        return !!findEffortOptionElement(node, targetTier);
       }) || Array.from(document.querySelectorAll('[role="menu"]')).find((node) => {
         if (node === menu) return false;
         return !!node.querySelector('[data-testid="model-selector-effort-option"]');
@@ -266,20 +804,15 @@
     if (!submenu) return false;
     submenu.classList.add('ag-effort-submenu-hidden');
 
-    const option = submenu.querySelector(
-      '[data-testid="model-selector-effort-option"][data-effort="' + level.toLowerCase() + '"]'
-    );
-    const target = option?.closest('[role="menuitem"], [role="menuitemradio"]') ||
-      Array.from(submenu.querySelectorAll('[role="menuitem"], [role="menuitemradio"]'))
-        .find((item) => (item.textContent || '').trim() === level);
+    const target = findEffortOptionElement(submenu, targetTier);
     if (!target) return false;
 
     target.click();
     for (let attempt = 0; attempt < 10; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 60));
-      if (modelBaseFromTrigger()?.effort === level) return true;
+      if (modelBaseFromTrigger()?.current?.key === targetTier.key) return true;
     }
-    return modelBaseFromTrigger()?.effort === level;
+    return modelBaseFromTrigger()?.current?.key === targetTier.key;
   }
 
   function markEffortMenu(menu) {
@@ -288,7 +821,7 @@
       .map((item) => (item.textContent || '').trim())
       .filter(Boolean);
     if (!labels.length) return;
-    const hits = labels.filter((label) => /^(low|medium|high|minimal|低|中|高)(\b|$)/i.test(label)).length;
+    const hits = labels.filter((label) => /^(off|none|minimal|min|low|medium|med|high|xhigh|x-high|extra|max|ultra|关|关闭|极低|低|中|高|极高|极限)(\b|$)/i.test(label)).length;
     if (hits >= 2 || hits === labels.length) {
       menu.classList.add('ag-effort-submenu-hidden');
     }
@@ -318,13 +851,17 @@
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
     window.__agEffortMenuObserver = observer;
+    lifecycle.onDispose(() => {
+      try { observer.disconnect(); } catch (error) {}
+      if (window.__agEffortMenuObserver === observer) delete window.__agEffortMenuObserver;
+    });
   }
 
   function installModelRowSelection() {
     if (window.__agModelRowSelectionBound) return;
     window.__agModelRowSelectionBound = true;
 
-    document.addEventListener('click', async (event) => {
+    lifecycle.addListener(document, 'click', async (event) => {
       const row = event.target.closest?.('[data-testid="model-selector-panel"] [role="menuitem"][aria-haspopup="menu"]');
       if (!row || event.target.closest('.ag-model-effort')) return;
 
@@ -337,10 +874,15 @@
       const current = modelBaseFromTrigger();
       if (current && current.base === base) return;
 
-      const effortInput = document.querySelector('.ag-model-effort input[type="range"]');
-      const desired = EFFORTS[Math.round(Number(effortInput?.value) || 0)] || current?.effort || 'Medium';
-      const success = await applyEffort(desired, base);
+      const desiredTier = current?.current || normalizeEffortSpec('medium');
+      const success = await applyEffort(desiredTier, base);
       if (!success) return;
+
+      if (current?.source === 'fiber') {
+        closeModelMenu();
+        ensureEffortPill();
+        return;
+      }
 
       await new Promise((resolve) => setTimeout(resolve, 260));
       if (getVisibleMenus().some((menu) => menu.querySelector('[data-testid="model-selector-panel"]'))) {
@@ -349,42 +891,94 @@
     }, true);
   }
 
-  function ensureModelEffort() {
-    installEffortMenuGuard();
-    const menu = getVisibleMenus().find((node) => node.querySelector('[data-testid="model-selector-panel"]'));
-    if (menu) {
-      hideEffortSubmenus();
-      installModelRowSelection();
+  function modelEffortCardMarkup(info) {
+    const tiers = info.tiers;
+    const max = Math.max(1, tiers.length - 1);
+    const fillPct = info.fixed ? 100 : (info.index / max) * 100;
+    const ticksHtml = tiers.map((_, idx) =>
+      '<i data-index="' + idx + '"' + (idx <= info.index ? ' data-reached="true"' : '') + '></i>'
+    ).join('');
+    const scaleHtml = tiers.map((tier, idx) =>
+      '<span data-index="' + idx + '"' + (idx === info.index ? ' class="is-active"' : '') + '>' + escapeHtml(tier.label) + '</span>'
+    ).join('');
+    const tierBadge = info.fixed ? '固定档位' : (tiers.length + ' 档自适应');
+    if (info.fixed) {
+      return [
+        '<div class="ag-effort-top">',
+        '<span class="ag-effort-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80 360-280h240L480-80Zm0-240L240-680h480L480-320Zm0-360L120-920h720L480-680Z"></path></svg></span>',
+        '<span class="ag-effort-title">思考强度</span>',
+        '<span class="ag-effort-tier-badge">' + tierBadge + '</span>',
+        '<strong class="ag-effort-value">' + escapeHtml(info.current.fullLabel) + '</strong>',
+        '</div>',
+        '<div class="ag-effort-model">' + escapeHtml(info.base) + '</div>'
+      ].join('');
     }
-    if (!menu || menu.querySelector('.ag-model-effort')) return;
-
-    const info = modelBaseFromTrigger();
-    if (!info) return;
-
-    const panel = make('div', 'ag-model-effort');
-    panel.innerHTML = [
+    return [
       '<div class="ag-effort-top">',
       '<span class="ag-effort-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80 360-280h240L480-80Zm0-240L240-680h480L480-320Zm0-360L120-920h720L480-680Z"></path></svg></span>',
       '<span class="ag-effort-title">思考强度</span>',
-      '<strong class="ag-effort-value">' + EFFORT_LABELS[info.effort] + '</strong>',
+      '<span class="ag-effort-tier-badge">' + tierBadge + '</span>',
+      '<strong class="ag-effort-value">' + escapeHtml(info.current.fullLabel) + '</strong>',
       '</div>',
       '<div class="ag-effort-model">' + escapeHtml(info.base) + '</div>',
-      '<div class="ag-effort-control" style="--ag-effort-fill:' + (info.index * 50) + '%">',
-      '<input type="range" min="0" max="2" step="0.01" value="' + info.index + '" aria-label="思考强度">',
-      '<div class="ag-effort-ticks"><i></i><i></i><i></i></div>',
+      '<div class="ag-effort-control" style="--ag-effort-fill:' + fillPct + '%">',
+      '<input type="range" min="0" max="' + max + '" step="0.01" value="' + info.index + '" aria-label="思考强度">',
+      '<div class="ag-effort-ticks">' + ticksHtml + '</div>',
       '</div>',
-      '<div class="ag-effort-scale"><span>低</span><span>中</span><span>高</span></div>'
+      '<div class="ag-effort-scale">' + scaleHtml + '</div>'
     ].join('');
+  }
 
+  function syncModelEffortPanel(panel, info) {
+    if (!panel || !info) return;
+    const sig = info.base + '|' + info.tiers.map((t) => t.key).join(',');
+    panel.__agEffortInfo = info;
+    if (panel.dataset.tierSig !== sig) {
+      panel.dataset.tierSig = sig;
+      panel.innerHTML = modelEffortCardMarkup(info);
+      bindModelEffortCardControls(panel);
+      return;
+    }
+    const valNode = panel.querySelector('.ag-effort-value');
+    if (valNode) valNode.textContent = info.current.fullLabel;
+    const range = panel.querySelector('input[type="range"]');
+    const control = panel.querySelector('.ag-effort-control');
+    if (range && control && !range.disabled) {
+      const max = Math.max(1, info.tiers.length - 1);
+      range.value = String(info.index);
+      control.style.setProperty('--ag-effort-fill', ((info.index / max) * 100) + '%');
+      panel.querySelectorAll('.ag-effort-ticks i').forEach((node, idx) => {
+        if (idx <= info.index) node.setAttribute('data-reached', 'true');
+        else node.removeAttribute('data-reached');
+      });
+      panel.querySelectorAll('.ag-effort-scale span').forEach((node, idx) => {
+        node.classList.toggle('is-active', idx === info.index);
+      });
+    }
+  }
+
+  function bindModelEffortCardControls(panel) {
     const range = panel.querySelector('input[type="range"]');
     const valueNode = panel.querySelector('.ag-effort-value');
     const control = panel.querySelector('.ag-effort-control');
+    if (!range || !control) return;
 
     const update = () => {
-      const pos = Math.max(0, Math.min(1, Number(range.value) / 2 || 0));
-      const index = Math.max(0, Math.min(2, Math.round(pos * 2)));
-      valueNode.textContent = EFFORT_LABELS[EFFORTS[index]];
+      const liveInfo = panel.__agEffortInfo;
+      if (!liveInfo || liveInfo.fixed) return;
+      const max = Math.max(1, liveInfo.tiers.length - 1);
+      const pos = Math.max(0, Math.min(1, Number(range.value) / max || 0));
+      const index = Math.max(0, Math.min(max, Math.round(pos * max)));
+      const tier = liveInfo.tiers[index];
+      if (valueNode && tier) valueNode.textContent = tier.fullLabel;
       control.style.setProperty('--ag-effort-fill', (pos * 100) + '%');
+      panel.querySelectorAll('.ag-effort-ticks i').forEach((node, idx) => {
+        if (idx <= index) node.setAttribute('data-reached', 'true');
+        else node.removeAttribute('data-reached');
+      });
+      panel.querySelectorAll('.ag-effort-scale span').forEach((node, idx) => {
+        node.classList.toggle('is-active', idx === index);
+      });
     };
 
     range.addEventListener('input', (event) => {
@@ -396,35 +990,51 @@
     range.addEventListener('click', (event) => event.stopPropagation());
     range.addEventListener('change', async (event) => {
       event.stopPropagation();
-      const index = Math.max(0, Math.min(2, Math.round(Number(range.value) / 2 * 2)));
-      range.value = String(index);
-      update();
-      const level = EFFORTS[index];
       const current = modelBaseFromTrigger();
-      if (!level || !current) return;
-      if (level === current.effort) {
-        range.value = String(current.index);
-        update();
-        return;
-      }
+      if (!current || current.fixed) return;
+      const max = Math.max(1, current.tiers.length - 1);
+      const index = Math.max(0, Math.min(max, Math.round(Number(range.value) || 0)));
+      range.value = String(index);
+      const targetTier = current.tiers[index];
+      panel.__agEffortInfo = current;
+      update();
+      if (!targetTier || targetTier.key === current.current.key) return;
 
       range.disabled = true;
       panel.classList.add('is-applying');
       try {
-        await applyEffort(level, current.base);
+        await switchEffort(targetTier, { keepMenuOpen: true });
         const next = modelBaseFromTrigger();
-        if (next) {
-          range.value = String(next.index);
-          const modelNode = panel.querySelector('.ag-effort-model');
-          if (modelNode) modelNode.textContent = next.base;
-          update();
-        }
-        reopenModelMenu();
+        if (next) syncModelEffortPanel(panel, next);
       } finally {
         range.disabled = false;
         panel.classList.remove('is-applying');
       }
     });
+  }
+
+  function ensureModelEffort() {
+    installEffortMenuGuard();
+    const menu = getVisibleMenus().find((node) => node.querySelector('[data-testid="model-selector-panel"]'));
+    if (menu) {
+      hideEffortSubmenus();
+      installModelRowSelection();
+    }
+    if (!menu) return;
+
+    const info = modelBaseFromTrigger();
+    const existing = menu.querySelector('.ag-model-effort');
+    if (!info) {
+      existing?.remove();
+      return;
+    }
+    if (existing) {
+      syncModelEffortPanel(existing, info);
+      return;
+    }
+
+    const panel = make('div', 'ag-model-effort');
+    syncModelEffortPanel(panel, info);
 
     const host = menu.querySelector('[data-testid="model-selector-panel"]');
     if (host) host.insertBefore(panel, host.firstElementChild);
@@ -525,7 +1135,7 @@
     let payload = null;
     while (offset + 5 <= buffer.length) {
       const flag = buffer[offset];
-      const length = (buffer[offset + 1] << 24) | (buffer[offset + 2] << 16) | (buffer[offset + 3] << 8) | buffer[offset + 4];
+      const length = new DataView(buffer.buffer, buffer.byteOffset + offset + 1, 4).getUint32(0, false);
       const start = offset + 5;
       const end = start + length;
       offset = end;
@@ -575,10 +1185,10 @@
     return definitions.filter((entry) => entry.models.length).map((entry) => {
       const style = QUOTA_GROUP_STYLES[entry.key];
       const models = entry.models;
-      const weeklyPercent = Math.min(...models.map((model) => Math.max(0, Math.min(100, Number(model.five_hour_remaining_pct) || 0))));
-      const fivePercent = Math.max(...models.map((model) => Math.max(0, Math.min(100, Number(model.weekly_remaining_pct) || 0))));
-      const weeklyReset = models.map((model) => model.five_hour_reset).find(Boolean) || '';
-      const fiveReset = models.map((model) => model.weekly_reset).find(Boolean) || '';
+      const fivePercent = Math.min(...models.map((model) => Math.max(0, Math.min(100, Number(model.five_hour_remaining_pct) || 0))));
+      const weeklyPercent = Math.min(...models.map((model) => Math.max(0, Math.min(100, Number(model.weekly_remaining_pct) || 0))));
+      const fiveReset = models.map((model) => model.five_hour_reset).find(Boolean) || '';
+      const weeklyReset = models.map((model) => model.weekly_reset).find(Boolean) || '';
       return {
         key: entry.key,
         label: entry.label,
@@ -765,10 +1375,10 @@
           toggle.setAttribute('aria-label', next ? '展开额度面板' : '收起额度面板');
           toggle.title = next ? '展开额度面板' : '收起额度面板';
         }
-        localStorage.setItem('ag-usage-collapsed', next ? '1' : '0');
+        safeStorageSet('ag-usage-collapsed', next ? '1' : '0');
       };
 
-      const storedCollapsed = localStorage.getItem('ag-usage-collapsed');
+      const storedCollapsed = safeStorageGet('ag-usage-collapsed');
       setCollapsed(storedCollapsed === null ? true : storedCollapsed === '1');
 
       const toggle = panel.querySelector('[data-ag-usage-toggle]');
@@ -787,7 +1397,7 @@
       mode.addEventListener('click', (event) => {
         event.stopPropagation();
         usageMode = usageMode === 'ring' ? 'detail' : 'ring';
-        localStorage.setItem('ag-usage-mode', usageMode);
+        safeStorageSet('ag-usage-mode', usageMode);
         renderUsage(panel);
       });
 
@@ -815,11 +1425,11 @@
       renderUsage(panel);
     }
 
-    const compactMigrated = localStorage.getItem('ag-usage-compact-v4') === '1';
+    const compactMigrated = safeStorageGet('ag-usage-compact-v4') === '1';
     if (!compactMigrated) {
       panel.classList.add('is-collapsed');
-      localStorage.setItem('ag-usage-collapsed', '1');
-      localStorage.setItem('ag-usage-compact-v4', '1');
+      safeStorageSet('ag-usage-collapsed', '1');
+      safeStorageSet('ag-usage-compact-v4', '1');
       const toggleNode = panel.querySelector('[data-ag-usage-toggle]');
       if (toggleNode) {
         toggleNode.setAttribute('aria-label', '展开额度面板');
@@ -901,10 +1511,10 @@
         handle.classList.toggle('is-collapsed', !collapsed);
 
         const started = performance.now();
-        const timer = window.setInterval(() => {
+        const timer = lifecycle.setInterval(() => {
           updateSidebarHandle(true);
           if (performance.now() - started > 560) {
-            window.clearInterval(timer);
+            lifecycle.clearInterval(timer);
             updateSidebarHandle(true);
           }
         }, 16);
@@ -1108,6 +1718,173 @@
     ].join('');
   }
 
+  const COMPOSER_PANEL_IDS = ['plugins', 'prompts', 'mcp'];
+  const pluginsDeckState = { loading: false, error: '', loaded: PLUGINS.length > 0 || SKILLS.length > 0, abortCtrl: null };
+  const promptDeckState = {
+    loading: false,
+    saving: false,
+    error: '',
+    saveError: '',
+    hydrated: false,
+    abortCtrl: null,
+    confirmDeleteId: '',
+    confirmDeleteTimer: 0
+  };
+
+  function getComposerTrigger(panelId) {
+    return getComposer()?.querySelector('[data-ag-composer-action="toggle-panel"][data-ag-panel="' + panelId + '"]') || null;
+  }
+
+  function getComposerPanel(panelId) {
+    return getComposer()?.querySelector('[data-ag-panel-id="' + panelId + '"]') || null;
+  }
+
+  function renderPanelBanner({ kind = 'loading', message = '', retryAction = '', retryLabel = '重试', retryAttr = '' }) {
+    if (!message) return '';
+    const cls = kind === 'error' ? 'ag-panel-banner is-error' : 'ag-panel-banner is-loading';
+    const retryBtn = retryAction || retryAttr
+      ? '<button type="button" class="ag-panel-retry"' +
+        (retryAction ? ' data-ag-action="' + escapeHtml(retryAction) + '"' : '') +
+        (retryAttr ? ' ' + retryAttr : '') +
+        '>' + escapeHtml(retryLabel) + '</button>'
+      : '';
+    return '<div class="' + cls + '" role="status"><span class="ag-panel-banner-text">' + escapeHtml(message) + '</span>' + retryBtn + '</div>';
+  }
+
+  function closeSingleComposerPanel(panelId) {
+    const trigger = getComposerTrigger(panelId);
+    const panel = getComposerPanel(panelId);
+    if (panel) {
+      panel.classList.remove('is-open');
+      panel.style.maxHeight = '';
+      if (panelId === 'prompts') hidePromptForm(panel);
+    }
+    if (trigger) {
+      trigger.classList.remove('is-active');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function setActiveComposerPanel(targetPanelId, options = {}) {
+    const composer = getComposer();
+    if (!composer) return false;
+    if (!targetPanelId || !COMPOSER_PANEL_IDS.includes(targetPanelId)) {
+      const anyWasOpen = COMPOSER_PANEL_IDS.some((id) => getComposerPanel(id)?.classList.contains('is-open'));
+      COMPOSER_PANEL_IDS.forEach(closeSingleComposerPanel);
+      if (anyWasOpen && options.restoreFocus) {
+        restoreComposerCaret({ focus: true });
+      }
+      return false;
+    }
+
+    captureComposerCaret();
+    COMPOSER_PANEL_IDS.forEach((id) => {
+      if (id !== targetPanelId) closeSingleComposerPanel(id);
+    });
+
+    const panel = getComposerPanel(targetPanelId);
+    const trigger = getComposerTrigger(targetPanelId);
+    if (!panel || !trigger) return false;
+
+    const rect = composer.getBoundingClientRect();
+    const maxCap = targetPanelId === 'mcp' ? 420 : 390;
+    const minCap = targetPanelId === 'prompts' ? 210 : (targetPanelId === 'mcp' ? 200 : 190);
+    panel.style.maxHeight = Math.min(maxCap, Math.max(minCap, rect.top - 58)) + 'px';
+    panel.classList.add('is-open');
+    trigger.classList.add('is-active');
+    trigger.setAttribute('aria-expanded', 'true');
+
+    if (targetPanelId === 'plugins') {
+      const search = panel.querySelector('.ag-plugin-search');
+      if (search) {
+        search.value = '';
+        panel.dataset.deckTab = 'plugins';
+      }
+      renderDeck(panel, '');
+      if (!PLUGINS.length && !SKILLS.length && !pluginsDeckState.loading) {
+        void refreshPluginCatalog();
+      }
+      if (search) {
+        lifecycle.setTimeout(() => {
+          if (panel.classList.contains('is-open')) search.focus();
+        }, 25);
+      }
+    } else if (targetPanelId === 'prompts') {
+      hidePromptForm(panel);
+      renderPromptList(panel);
+      if (!promptDeckState.hydrated && !promptDeckState.loading) {
+        void hydratePromptPresets();
+      }
+      if (options.fromKeyboard) {
+        lifecycle.setTimeout(() => {
+          const targetFocus = panel.querySelector('.ag-prompt-item[role="button"], [data-ag-prompt-new], [data-ag-prompt-close]');
+          targetFocus?.focus?.();
+        }, 25);
+      }
+    } else if (targetPanelId === 'mcp') {
+      renderMcpDeck();
+      void loadMcpStates();
+      if (options.fromKeyboard) {
+        lifecycle.setTimeout(() => {
+          const targetFocus = panel.querySelector('.ag-mcp-item[role="button"], [data-ag-mcp-reload], [data-ag-mcp-close]');
+          targetFocus?.focus?.();
+        }, 25);
+      }
+    }
+    return true;
+  }
+
+  function toggleComposerPanel(panelId, options = {}) {
+    const panel = getComposerPanel(panelId);
+    const isOpen = Boolean(panel && panel.classList.contains('is-open'));
+    if (isOpen) {
+      setActiveComposerPanel(null, { restoreFocus: options.restoreFocus !== false });
+      return false;
+    }
+    return setActiveComposerPanel(panelId, options);
+  }
+
+  async function refreshPluginCatalog() {
+    if (pluginsDeckState.abortCtrl) {
+      try { pluginsDeckState.abortCtrl.abort(); } catch (error) {}
+      lifecycle.releaseAbort(pluginsDeckState.abortCtrl);
+    }
+    const ctrl = lifecycle.trackAbort();
+    pluginsDeckState.abortCtrl = ctrl;
+    pluginsDeckState.loading = true;
+    pluginsDeckState.error = '';
+    const panel = getComposerPanel('plugins');
+    if (panel) renderDeck(panel, panel.querySelector('.ag-plugin-search')?.value || '');
+    try {
+      const response = await fetch(SIDECAR + '/api/catalog', {
+        cache: 'no-store',
+        headers: sidecarTokenHeader(),
+        signal: ctrl.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || ('HTTP ' + response.status));
+      }
+      if (Array.isArray(data.plugins)) PLUGINS = data.plugins;
+      if (Array.isArray(data.skills)) SKILLS = data.skills;
+      pluginsDeckState.loaded = true;
+      pluginsDeckState.error = '';
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      pluginsDeckState.error = error && error.message ? error.message : String(error);
+    } finally {
+      if (pluginsDeckState.abortCtrl === ctrl) {
+        pluginsDeckState.abortCtrl = null;
+        pluginsDeckState.loading = false;
+      }
+      lifecycle.releaseAbort(ctrl);
+      if (!lifecycle.disposed) {
+        const current = getComposerPanel('plugins');
+        if (current) renderDeck(current, current.querySelector('.ag-plugin-search')?.value || '');
+      }
+    }
+  }
+
   function renderDeck(panel, query) {
     if (!panel) return;
     const list = panel.querySelector('.ag-plugin-list');
@@ -1133,40 +1910,71 @@
       return deckMatches(haystack, deckInitials(name + ' ' + (item.name || '')), search);
     });
 
-    list.innerHTML = entries.length
-      ? entries.map((entry, index) => deckItemMarkup(entry.kind, entry.item, index, favorites)).join('')
-      : '<div class="ag-plugin-empty">' + (tab === 'favorites' ? '还没有收藏，点条目右侧的 ☆ 收藏' : '没有匹配的插件或 Skill') + '</div>';
+    const parts = [];
+    if (pluginsDeckState.loading) {
+      parts.push(renderPanelBanner({ kind: 'loading', message: '正在读取已安装插件与技能…' }));
+    } else if (pluginsDeckState.error) {
+      parts.push(renderPanelBanner({
+        kind: 'error',
+        message: '读取插件失败：' + pluginsDeckState.error,
+        retryAction: 'retry-plugins',
+        retryLabel: '重试'
+      }));
+    }
+
+    if (entries.length) {
+      parts.push(entries.map((entry, index) => deckItemMarkup(entry.kind, entry.item, index, favorites)).join(''));
+    } else if (!pluginsDeckState.loading && !pluginsDeckState.error) {
+      const emptyMsg = tab === 'favorites'
+        ? '还没有收藏，点条目右侧的 ☆ 收藏'
+        : (!PLUGINS.length && !SKILLS.length ? '未检测到已安装插件或 Skill' : '没有匹配的插件或 Skill');
+      parts.push('<div class="ag-plugin-empty">' + emptyMsg + '</div>');
+    }
+
+    list.innerHTML = parts.join('');
+    list.querySelectorAll('.ag-plugin-item').forEach((node) => node.setAttribute('data-ag-panel-item', 'plugins'));
 
     const count = panel.querySelector('.ag-plugin-count');
     if (count) count.textContent = String(entries.length);
     panel.querySelectorAll('.ag-plugin-tab').forEach((node) => {
-      node.classList.toggle('is-active', node.getAttribute('data-ag-deck-tab') === tab);
+      const isTabActive = node.getAttribute('data-ag-deck-tab') === tab;
+      node.classList.toggle('is-active', isTabActive);
+      node.setAttribute('aria-selected', isTabActive ? 'true' : 'false');
     });
     const create = panel.querySelector('.ag-plugin-create');
     if (create) create.hidden = tab !== 'plugins';
   }
 
   function buildPluginPanel() {
-    const panel = make('div', 'ag-plugin-panel');
+    const panel = make('div', 'ag-plugin-panel ag-compass-panel');
+    panel.id = 'ag-composer-panel-plugins';
+    panel.setAttribute('data-ag-panel-id', 'plugins');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', '技能罗盘');
     panel.dataset.deckTab = 'plugins';
     panel.innerHTML = [
       '<div class="ag-plugin-head">',
       '<div class="ag-plugin-title"><span class="ag-plugin-mark">' + pluginIconSvg() + '</span><span>技能罗盘</span><span class="ag-plugin-count">' + (PLUGINS.length + SKILLS.length) + '</span></div>',
-      '<button type="button" class="ag-plugin-close" aria-label="关闭技能罗盘">',
+      '<div class="ag-plugin-head-actions">',
+      '<button type="button" class="ag-plugin-close ag-plugin-refresh" data-ag-action="reload-plugins" aria-label="刷新插件列表" title="刷新插件列表">',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"></path></svg>',
+      '</button>',
+      '<button type="button" class="ag-plugin-close" data-ag-action="close-panel" aria-label="关闭技能罗盘">',
       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M256-226.23 226.23-256 480-522.15 733.77-256 704-226.23 480-480 256-226.23Z"></path></svg>',
       '</button>',
       '</div>',
+      '</div>',
       '<div class="ag-plugin-tabs" role="tablist" aria-label="技能分类">',
-      '<button type="button" class="ag-plugin-tab is-active" data-ag-deck-tab="plugins" role="tab">插件</button>',
-      '<button type="button" class="ag-plugin-tab" data-ag-deck-tab="skills" role="tab">技能库</button>',
-      '<button type="button" class="ag-plugin-tab" data-ag-deck-tab="favorites" role="tab">收藏</button>',
+      '<button type="button" class="ag-plugin-tab is-active" data-ag-deck-tab="plugins" data-ag-action="switch-deck-tab" role="tab" aria-selected="true">插件</button>',
+      '<button type="button" class="ag-plugin-tab" data-ag-deck-tab="skills" data-ag-action="switch-deck-tab" role="tab" aria-selected="false">技能库</button>',
+      '<button type="button" class="ag-plugin-tab" data-ag-deck-tab="favorites" data-ag-action="switch-deck-tab" role="tab" aria-selected="false">收藏</button>',
       '</div>',
       '<div class="ag-plugin-search-wrap">',
       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M781.69-136.92 530.46-388.16q-30 24.77-69 38.77t-80.69 14q-102.46 0-173.54-71.08T136.16-580t71.08-173.54t173.54-71.08t173.54 71.08T625.38-580q0 42.85-14.38 81.85t-38.38 67.85L823.84-179.08l-42.15 42.15ZM380.77-395.38q77.31 0 130.96-53.65T565.39-580T511.73-710.96T380.77-764.62T249.81-710.96T196.15-580t53.65 130.96t130.96 53.65Z"></path></svg>',
       '<input type="text" class="ag-plugin-search" placeholder="搜索名称 / 描述 / 首字母…" aria-label="搜索插件与 Skill">',
       '</div>',
       '<div class="ag-plugin-list" role="group" aria-label="插件与 Skill"></div>',
-      '<button type="button" class="ag-plugin-create">',
+      '<button type="button" class="ag-plugin-create" data-ag-action="create-plugin">',
       '<span class="ag-plugin-create-plus">+</span><span>创建新插件</span>',
       '</button>'
     ].join('');
@@ -1180,148 +1988,30 @@
     const footer = composer.querySelector('[class*="input-footer"]');
     if (!footer) return;
 
-    let trigger = composer.querySelector('.ag-plugin-trigger');
+    composer.querySelectorAll('.ag-plugin-trigger:not([data-ag-panel])').forEach((stale) => stale.remove());
+    composer.querySelectorAll('.ag-plugin-panel:not([data-ag-panel-id])').forEach((stale) => stale.remove());
+
+    let trigger = getComposerTrigger('plugins');
     if (!trigger) {
-      trigger = make('button', 'ag-plugin-trigger');
+      trigger = make('button', 'ag-plugin-trigger ag-compass-trigger');
       trigger.type = 'button';
       trigger.title = '选择已安装插件';
       trigger.setAttribute('aria-label', '选择已安装插件');
+      trigger.setAttribute('data-ag-panel', 'plugins');
+      trigger.setAttribute('data-ag-composer-action', 'toggle-panel');
+      trigger.setAttribute('aria-haspopup', 'dialog');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-controls', 'ag-composer-panel-plugins');
       trigger.innerHTML = pluginIconSvg();
       const addContext = footer.querySelector('button[aria-label="Add context"]');
       if (addContext && addContext.parentElement) addContext.after(trigger);
       else footer.prepend(trigger);
     }
 
-    let panel = composer.querySelector('.ag-plugin-panel');
+    let panel = getComposerPanel('plugins');
     if (!panel) {
       panel = buildPluginPanel();
       composer.appendChild(panel);
-    }
-
-    if (!pluginPanelBound) {
-      pluginPanelBound = true;
-
-      const setOpen = (open) => {
-        const currentPanel = getComposer()?.querySelector('.ag-plugin-panel:not(.ag-prompt-panel)');
-        const currentTrigger = getComposer()?.querySelector('.ag-plugin-trigger:not(.ag-prompt-trigger)');
-        if (!currentPanel || !currentTrigger) return;
-        currentPanel.classList.toggle('is-open', open);
-        currentTrigger.classList.toggle('is-active', open);
-        if (open) {
-          const composer = getComposer();
-          if (composer) {
-            const rect = composer.getBoundingClientRect();
-            const availableAbove = Math.max(190, rect.top - 58);
-            currentPanel.style.maxHeight = Math.min(390, availableAbove) + 'px';
-            composer.querySelector('.ag-prompt-panel')?.classList.remove('is-open');
-            composer.querySelector('.ag-prompt-trigger')?.classList.remove('is-active');
-          }
-          const search = currentPanel.querySelector('.ag-plugin-search');
-          if (search) {
-            search.value = '';
-            currentPanel.dataset.deckTab = 'plugins';
-            renderDeck(currentPanel, '');
-            setTimeout(() => search.focus(), 30);
-          }
-        } else {
-          currentPanel.style.maxHeight = '';
-        }
-      };
-
-      document.addEventListener('click', (event) => {
-        const currentTrigger = event.target.closest?.('.ag-plugin-trigger:not(.ag-prompt-trigger)');
-        if (currentTrigger) {
-          event.preventDefault();
-          event.stopPropagation();
-          const currentPanel = getComposer()?.querySelector('.ag-plugin-panel:not(.ag-prompt-panel)');
-          setOpen(!(currentPanel && currentPanel.classList.contains('is-open')));
-          return;
-        }
-
-        const currentPanel = getComposer()?.querySelector('.ag-plugin-panel:not(.ag-prompt-panel)');
-        if (!currentPanel || !currentPanel.classList.contains('is-open')) return;
-
-        if (event.target.closest?.('.ag-plugin-close')) {
-          event.preventDefault();
-          setOpen(false);
-          return;
-        }
-
-        const tab = event.target.closest?.('[data-ag-deck-tab]');
-        if (tab) {
-          event.preventDefault();
-          currentPanel.dataset.deckTab = tab.getAttribute('data-ag-deck-tab') || 'plugins';
-          renderDeck(currentPanel, currentPanel.querySelector('.ag-plugin-search')?.value || '');
-          return;
-        }
-
-        const star = event.target.closest?.('[data-ag-deck-star]');
-        if (star) {
-          event.preventDefault();
-          event.stopPropagation();
-          const key = star.getAttribute('data-ag-deck-star');
-          const favorites = readDeckFavorites();
-          if (favorites.has(key)) favorites.delete(key);
-          else favorites.add(key);
-          writeDeckFavorites(favorites);
-          renderDeck(currentPanel, currentPanel.querySelector('.ag-plugin-search')?.value || '');
-          return;
-        }
-
-        const item = event.target.closest?.('.ag-plugin-item');
-        if (item) {
-          event.preventDefault();
-          const skillName = item.getAttribute('data-skill-name');
-          if (skillName) {
-            const skill = SKILLS.find((entry) => entry.name === skillName);
-            if (skill) {
-              insertSkillTag(skill);
-              setOpen(false);
-            }
-            return;
-          }
-          const plugin = PLUGINS.find((entry) => entry.id === item.getAttribute('data-plugin-id'));
-          if (plugin) {
-            insertPluginTag(plugin);
-            setOpen(false);
-          }
-          return;
-        }
-
-        const create = event.target.closest?.('.ag-plugin-create');
-        if (create) {
-          event.preventDefault();
-          insertComposerText('请帮我创建一个新的 Antigravity 插件：');
-          setOpen(false);
-          return;
-        }
-
-        if (!currentPanel.contains(event.target)) setOpen(false);
-      }, true);
-
-      document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape') return;
-        const currentPanel = getComposer()?.querySelector('.ag-plugin-panel:not(.ag-prompt-panel)');
-        if (!currentPanel || !currentPanel.classList.contains('is-open')) return;
-        event.stopPropagation();
-        setOpen(false);
-      }, true);
-
-      document.addEventListener('input', (event) => {
-        const search = event.target.closest?.('.ag-plugin-search');
-        if (!search) return;
-        const currentPanel = getComposer()?.querySelector('.ag-plugin-panel:not(.ag-prompt-panel)');
-        if (!currentPanel) return;
-        renderDeck(currentPanel, search.value);
-      }, true);
-
-      document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        const item = event.target.closest?.('.ag-plugin-item[role="button"]');
-        if (!item) return;
-        event.preventDefault();
-        item.click();
-      });
     }
   }
 
@@ -1337,7 +2027,6 @@
   const PROMPT_STORAGE_KEY = 'ag-prompt-presets-v2';
 
   let promptPresetsCache = null;
-  let promptHydrated = false;
 
   function loadPromptPresets() {
     if (Array.isArray(promptPresetsCache)) return promptPresetsCache;
@@ -1378,25 +2067,70 @@
     return seeded;
   }
 
-  function savePromptPresets(presets) {
+  const sidecarTokenHeader = () => (window.__AG_STARLIGHT_TOKEN__ ? { 'X-Starlight-Token': window.__AG_STARLIGHT_TOKEN__ } : {});
+
+  function renderAllPromptPanels() {
+    document.querySelectorAll('[data-ag-panel-id="prompts"]').forEach((panel) => {
+      renderPromptList(panel);
+      const count = panel.querySelector('[data-ag-prompt-count]');
+      if (count) count.textContent = String(loadPromptPresets().length);
+    });
+  }
+
+  async function savePromptPresets(presets) {
     promptPresetsCache = presets;
     try {
       localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(presets));
     } catch (error) {}
-    fetch(SIDECAR + '/api/prompts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompts: presets })
-    }).catch(() => {});
+    promptDeckState.saving = true;
+    promptDeckState.saveError = '';
+    renderAllPromptPanels();
+    const ctrl = lifecycle.trackAbort();
+    try {
+      const response = await fetch(SIDECAR + '/api/prompts', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, sidecarTokenHeader()),
+        body: JSON.stringify({ prompts: presets }),
+        signal: ctrl.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || ('HTTP ' + response.status));
+      }
+      promptDeckState.hydrated = true;
+      promptDeckState.saveError = '';
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      promptDeckState.saveError = '同步保存到本地服务失败（已暂存本地缓存）：' + (error && error.message ? error.message : String(error));
+    } finally {
+      promptDeckState.saving = false;
+      lifecycle.releaseAbort(ctrl);
+      if (!lifecycle.disposed) renderAllPromptPanels();
+    }
   }
 
-  async function hydratePromptPresets() {
-    if (promptHydrated) return;
-    promptHydrated = true;
+  async function hydratePromptPresets(options = {}) {
+    if (promptDeckState.hydrated && !options.force) return;
+    if (promptDeckState.loading && !options.force) return;
+    if (promptDeckState.abortCtrl) {
+      try { promptDeckState.abortCtrl.abort(); } catch (error) {}
+      lifecycle.releaseAbort(promptDeckState.abortCtrl);
+    }
+    const ctrl = lifecycle.trackAbort();
+    promptDeckState.abortCtrl = ctrl;
+    promptDeckState.loading = true;
+    promptDeckState.error = '';
+    renderAllPromptPanels();
     try {
-      const response = await fetch(SIDECAR + '/api/prompts', { cache: 'no-store' });
-      if (!response.ok) return;
-      const data = await response.json();
+      const response = await fetch(SIDECAR + '/api/prompts', {
+        cache: 'no-store',
+        headers: sidecarTokenHeader(),
+        signal: ctrl.signal
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.error || ('HTTP ' + response.status));
+      }
       const list = Array.isArray(data.prompts) ? data.prompts.filter((item) => item && item.id && item.title && item.prompt) : [];
       if (list.length) {
         promptPresetsCache = list;
@@ -1405,18 +2139,21 @@
         } catch (error) {}
       } else {
         const seeded = loadPromptPresets();
-        fetch(SIDECAR + '/api/prompts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompts: seeded })
-        }).catch(() => {});
+        await savePromptPresets(seeded);
       }
-      document.querySelectorAll('.ag-prompt-panel').forEach(renderPromptList);
-      document.querySelectorAll('.ag-prompt-panel').forEach((panel) => {
-        const count = panel.querySelector('[data-ag-prompt-count]');
-        if (count) count.textContent = String(loadPromptPresets().length);
-      });
-    } catch (error) {}
+      promptDeckState.hydrated = true;
+      promptDeckState.error = '';
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      promptDeckState.error = '读取提示词失败：' + (error && error.message ? error.message : String(error));
+    } finally {
+      if (promptDeckState.abortCtrl === ctrl) {
+        promptDeckState.abortCtrl = null;
+        promptDeckState.loading = false;
+      }
+      lifecycle.releaseAbort(ctrl);
+      if (!lifecycle.disposed) renderAllPromptPanels();
+    }
   }
 
   function insertPromptTemplate(text) {
@@ -1443,22 +2180,32 @@
 
   function buildPromptPanel() {
     const panel = make('div', 'ag-plugin-panel ag-prompt-panel');
+    panel.id = 'ag-composer-panel-prompts';
+    panel.setAttribute('data-ag-panel-id', 'prompts');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', '提示词预设');
     panel.innerHTML = [
       '<div class="ag-plugin-head">',
       '<div class="ag-plugin-title"><span class="ag-plugin-mark">' + promptIconSvg() + '</span><span>提示词预设</span><span class="ag-plugin-count" data-ag-prompt-count>0</span></div>',
-      '<button type="button" class="ag-plugin-close" data-ag-prompt-close aria-label="关闭提示词预设">',
+      '<div class="ag-plugin-head-actions">',
+      '<button type="button" class="ag-plugin-close ag-plugin-refresh" data-ag-action="retry-prompts" aria-label="刷新提示词预设" title="同步提示词预设">',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"></path></svg>',
+      '</button>',
+      '<button type="button" class="ag-plugin-close" data-ag-prompt-close data-ag-action="close-panel" aria-label="关闭提示词预设">',
       '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M256-226.23 226.23-256 480-522.15 733.77-256 704-226.23 480-480 256-226.23Z"></path></svg>',
       '</button>',
       '</div>',
+      '</div>',
+      '<div class="ag-prompt-status" data-ag-prompt-status></div>',
       '<div class="ag-plugin-list ag-prompt-list" role="group" aria-label="提示词预设"></div>',
-      '<button type="button" class="ag-plugin-create ag-prompt-footer" data-ag-prompt-new>',
+      '<button type="button" class="ag-plugin-create ag-prompt-footer" data-ag-prompt-new data-ag-action="new-prompt">',
       '<span class="ag-plugin-create-plus">+</span><span>新建预设</span>',
       '</button>',
       '<form class="ag-prompt-form" data-ag-prompt-form>',
       '<input class="ag-prompt-input" data-ag-prompt-title type="text" maxlength="80" placeholder="预设名称">',
       '<textarea class="ag-prompt-textarea" data-ag-prompt-content placeholder="输入提示词内容..." spellcheck="false"></textarea>',
       '<div class="ag-prompt-form-actions">',
-      '<button type="button" class="ag-prompt-form-btn" data-ag-prompt-cancel>取消</button>',
+      '<button type="button" class="ag-prompt-form-btn" data-ag-prompt-cancel data-ag-action="cancel-prompt">取消</button>',
       '<button type="submit" class="ag-prompt-form-btn primary">保存</button>',
       '</div>',
       '</form>'
@@ -1469,13 +2216,38 @@
   function renderPromptList(panel) {
     const list = panel?.querySelector('.ag-prompt-list');
     if (!list) return;
+    const status = panel.querySelector('[data-ag-prompt-status]');
+    if (status) {
+      if (promptDeckState.loading) {
+        status.innerHTML = renderPanelBanner({ kind: 'loading', message: '正在同步提示词预设…' });
+      } else if (promptDeckState.saving) {
+        status.innerHTML = renderPanelBanner({ kind: 'loading', message: '正在保存提示词预设…' });
+      } else if (promptDeckState.error) {
+        status.innerHTML = renderPanelBanner({
+          kind: 'error',
+          message: promptDeckState.error,
+          retryAction: 'retry-prompts',
+          retryLabel: '重试'
+        });
+      } else if (promptDeckState.saveError) {
+        status.innerHTML = renderPanelBanner({
+          kind: 'error',
+          message: promptDeckState.saveError,
+          retryAction: 'retry-save-prompts',
+          retryLabel: '重试同步'
+        });
+      } else {
+        status.innerHTML = '';
+      }
+    }
     const presets = loadPromptPresets();
     const count = panel.querySelector('[data-ag-prompt-count]');
     if (count) count.textContent = String(presets.length);
-    list.innerHTML = presets.map((preset, index) => {
+    list.innerHTML = presets.length ? presets.map((preset, index) => {
       const color = PLUGIN_COLORS[index % PLUGIN_COLORS.length];
+      const confirmingDelete = promptDeckState.confirmDeleteId === preset.id;
       return [
-        '<div class="ag-plugin-item ag-prompt-item" data-ag-prompt-id="' + escapeHtml(preset.id) + '" role="button" tabindex="0" title="' + escapeHtml(preset.prompt) + '">',
+        '<div class="ag-plugin-item ag-prompt-item" data-ag-panel-item="prompts" data-ag-prompt-id="' + escapeHtml(preset.id) + '" role="button" tabindex="0" title="' + escapeHtml(preset.prompt) + '">',
         '<span class="ag-plugin-badge" style="--ag-plugin-color:' + color + '">',
         '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 -960 960 960" fill="currentColor"><path d="M240-160v-640h480v640L480-276 240-160Z"></path></svg>',
         '</span>',
@@ -1484,16 +2256,18 @@
         '<span class="ag-prompt-preview">' + escapeHtml(preset.prompt) + '</span>',
         '</span>',
         '<span class="ag-prompt-actions">',
-        '<button type="button" class="ag-prompt-action" data-ag-prompt-edit aria-label="编辑预设" title="编辑预设">',
+        '<button type="button" class="ag-prompt-action" data-ag-prompt-edit data-ag-action="edit-prompt" aria-label="编辑预设" title="编辑预设">',
         '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 -960 960 960" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"></path></svg>',
         '</button>',
-        '<button type="button" class="ag-prompt-action" data-ag-prompt-delete aria-label="删除预设" title="删除预设">',
-        '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 -960 960 960" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520H120v-60h180v-40h360v40h180v60h-80v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h60v-360h-60v360Zm120 0h60v-360h-60v360Z"></path></svg>',
+        '<button type="button" class="ag-prompt-action' + (confirmingDelete ? ' is-confirm' : '') + '" data-ag-prompt-delete data-ag-action="delete-prompt" aria-label="' + (confirmingDelete ? '确认删除预设' : '删除预设') + '" title="' + (confirmingDelete ? '再次点击确认删除' : '删除预设') + '">',
+        confirmingDelete
+          ? '<span class="ag-prompt-confirm-label">确认</span>'
+          : '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 -960 960 960" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520H120v-60h180v-40h360v40h180v60h-80v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h60v-360h-60v360Zm120 0h60v-360h-60v360Z"></path></svg>',
         '</button>',
         '</span>',
         '</div>'
       ].join('');
-    }).join('');
+    }).join('') : '<div class="ag-plugin-empty">还没有提示词预设，点击下方新建预设</div>';
   }
 
   function showPromptForm(panel, preset) {
@@ -1504,7 +2278,7 @@
     const content = panel.querySelector('[data-ag-prompt-content]');
     if (title) title.value = preset ? preset.title : '';
     if (content) content.value = preset ? preset.prompt : '';
-    setTimeout(() => title?.focus(), 30);
+    lifecycle.setTimeout(() => title?.focus(), 30);
   }
 
   function hidePromptForm(panel) {
@@ -1514,26 +2288,9 @@
   }
 
   function setPromptPanelOpen(open) {
-    const composer = getComposer();
-    const panel = composer?.querySelector('.ag-prompt-panel');
-    const trigger = composer?.querySelector('.ag-prompt-trigger');
-    if (!panel || !trigger) return;
-    if (open) {
-      composer.querySelector('.ag-plugin-panel:not(.ag-prompt-panel)')?.classList.remove('is-open');
-      composer.querySelector('.ag-plugin-trigger:not(.ag-prompt-trigger)')?.classList.remove('is-active');
-      const rect = composer.getBoundingClientRect();
-      panel.style.maxHeight = Math.min(390, Math.max(210, rect.top - 58)) + 'px';
-      renderPromptList(panel);
-      hidePromptForm(panel);
-    } else {
-      panel.style.maxHeight = '';
-      hidePromptForm(panel);
-    }
-    panel.classList.toggle('is-open', open);
-    trigger.classList.toggle('is-active', open);
+    if (open) setActiveComposerPanel('prompts');
+    else closeSingleComposerPanel('prompts');
   }
-
-  let promptPanelBound = false;
 
   function ensurePromptPresets() {
     const composer = getComposer();
@@ -1541,95 +2298,743 @@
     const footer = composer.querySelector('[class*="input-footer"]');
     if (!footer) return;
 
-    let trigger = composer.querySelector('.ag-prompt-trigger');
+    let trigger = getComposerTrigger('prompts');
     if (!trigger) {
       trigger = make('button', 'ag-plugin-trigger ag-prompt-trigger');
       trigger.type = 'button';
       trigger.title = '提示词预设';
       trigger.setAttribute('aria-label', '提示词预设');
+      trigger.setAttribute('data-ag-panel', 'prompts');
+      trigger.setAttribute('data-ag-composer-action', 'toggle-panel');
+      trigger.setAttribute('aria-haspopup', 'dialog');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-controls', 'ag-composer-panel-prompts');
       trigger.innerHTML = promptIconSvg();
-      const pluginTrigger = composer.querySelector('.ag-plugin-trigger:not(.ag-prompt-trigger)');
+      const pluginTrigger = getComposerTrigger('plugins');
       if (pluginTrigger) pluginTrigger.after(trigger);
       else footer.prepend(trigger);
     }
 
-    let panel = composer.querySelector('.ag-prompt-panel');
+    let panel = getComposerPanel('prompts');
     if (!panel) {
       panel = buildPromptPanel();
       composer.appendChild(panel);
       renderPromptList(panel);
     }
+  }
 
-    if (promptPanelBound) return;
-    promptPanelBound = true;
+  const MCP_STATUS_META = {
+    MCP_SERVER_STATUS_READY: { label: '就绪', tone: 'ready' },
+    MCP_SERVER_STATUS_PENDING: { label: '连接中', tone: 'pending' },
+    MCP_SERVER_STATUS_ERROR: { label: '连接失败', tone: 'error' },
+    MCP_SERVER_STATUS_DISABLED_BY_ADMIN: { label: '被策略禁用', tone: 'disabled' },
+    MCP_SERVER_STATUS_UNSPECIFIED: { label: '未连接', tone: 'idle' }
+  };
+  const MCP_TONE_COLORS = { ready: '#6EE7B7', pending: '#7DD3FC', error: '#FCA5A5', disabled: '#94A3B8', idle: '#C4B5FD' };
+  const mcpDeck = { states: [], loading: false, busy: '', error: '', actionError: '', fetchedAt: 0, expanded: new Set(), disabled: new Set(), abortCtrl: null };
 
-    document.addEventListener('click', (event) => {
-      const currentTrigger = event.target.closest?.('.ag-prompt-trigger');
-      if (currentTrigger) {
-        event.preventDefault();
-        event.stopPropagation();
-        const currentPanel = getComposer()?.querySelector('.ag-prompt-panel');
-        setPromptPanelOpen(!(currentPanel && currentPanel.classList.contains('is-open')));
-        return;
+  async function callLanguageServer(method, body, options = {}) {
+    const token = window.__APP_CONFIG__ && window.__APP_CONFIG__.csrfToken;
+    if (!token) throw new Error('缺少 CSRF token，无法调用本地服务');
+    const payload = new TextEncoder().encode(JSON.stringify(body || {}));
+    const frame = new Uint8Array(5 + payload.length);
+    new DataView(frame.buffer).setUint32(1, payload.length, false);
+    frame.set(payload, 5);
+    const ctrl = lifecycle.trackAbort(options.signal);
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 12000;
+    let timedOut = false;
+    const timeoutId = lifecycle.setTimeout(() => {
+      timedOut = true;
+      try { ctrl.abort(); } catch (error) {}
+    }, timeoutMs);
+    try {
+      const response = await fetch('/exa.language_server_pb.LanguageServerService/' + method, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'content-type': 'application/grpc-web+json',
+          'x-grpc-web': '1',
+          'x-codeium-csrf-token': token,
+          'x-user-agent': 'CONNECT_ES_USER_AGENT'
+        },
+        body: frame,
+        signal: ctrl.signal
+      });
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status + (response.statusText ? ' ' + response.statusText : ''));
       }
-
-      const currentPanel = getComposer()?.querySelector('.ag-prompt-panel');
-      if (!currentPanel || !currentPanel.classList.contains('is-open')) return;
-
-      if (event.target.closest?.('[data-ag-prompt-close]')) {
-        event.preventDefault();
-        setPromptPanelOpen(false);
-        return;
-      }
-
-      if (event.target.closest?.('[data-ag-prompt-new]')) {
-        event.preventDefault();
-        showPromptForm(currentPanel, null);
-        return;
-      }
-
-      if (event.target.closest?.('[data-ag-prompt-cancel]')) {
-        event.preventDefault();
-        hidePromptForm(currentPanel);
-        return;
-      }
-
-      const item = event.target.closest?.('.ag-prompt-item');
-      if (item) {
-        event.preventDefault();
-        const id = item.getAttribute('data-ag-prompt-id');
-        const presets = loadPromptPresets();
-        const preset = presets.find((entry) => entry.id === id);
-        if (!preset) return;
-
-        if (event.target.closest?.('[data-ag-prompt-delete]')) {
-          if (window.confirm('删除预设「' + preset.title + '」？')) {
-            const next = presets.filter((entry) => entry.id !== id);
-            savePromptPresets(next);
-            renderPromptList(currentPanel);
-          }
-          return;
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      let message = null;
+      let trailer = '';
+      let offset = 0;
+      while (offset + 5 <= buffer.length) {
+        const flag = buffer[offset];
+        const length = new DataView(buffer.buffer, buffer.byteOffset + offset + 1, 4).getUint32(0, false);
+        const start = offset + 5;
+        offset = start + length;
+        if (length <= 0 || offset > buffer.length) continue;
+        const chunkText = new TextDecoder().decode(buffer.slice(start, offset));
+        if (flag & 0x80) {
+          trailer = chunkText;
+          continue;
         }
+        try { message = JSON.parse(chunkText); } catch (error) {}
+      }
+      const status = response.headers.get('grpc-status') || (trailer.match(/grpc-status:\s*(\d+)/) || [])[1];
+      if (status && status !== '0') {
+        const raw = response.headers.get('grpc-message') || (trailer.match(/grpc-message:\s*([^\r\n]+)/) || [])[1] || '';
+        let detail = raw;
+        try { detail = decodeURIComponent(raw); } catch (error) {}
+        throw new Error(detail || ('gRPC 状态 ' + status));
+      }
+      return message;
+    } catch (error) {
+      if (timedOut) throw new Error('请求超时 (' + Math.round(timeoutMs / 1000) + 's)');
+      throw error;
+    } finally {
+      lifecycle.clearTimeout(timeoutId);
+      lifecycle.releaseAbort(ctrl);
+    }
+  }
 
-        if (event.target.closest?.('[data-ag-prompt-edit]')) {
-          showPromptForm(currentPanel, preset);
-          return;
+  function mcpSpec(state) { return state.spec || {}; }
+  function mcpMeta(state) { return MCP_STATUS_META[state && state.status] || MCP_STATUS_META.MCP_SERVER_STATUS_UNSPECIFIED; }
+  function mcpLabel(state) {
+    const spec = mcpSpec(state);
+    return spec.originalServerName || spec.serverName || '未命名服务器';
+  }
+  function mcpRemote(spec) { return Boolean(spec.serverUrl); }
+  function mcpSource(spec) {
+    if (spec.pluginName) return '插件 ' + spec.pluginName;
+    return spec.isGlobal === false ? '工作区配置' : '全局配置';
+  }
+  function mcpTimeLabel(ts) {
+    if (!ts) return '尚未刷新';
+    const d = new Date(ts);
+    return '更新于 ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+
+  async function loadMcpStates(options = {}) {
+    if (mcpDeck.loading && !options.force) return;
+    if (mcpDeck.abortCtrl) {
+      try { mcpDeck.abortCtrl.abort(); } catch (error) {}
+      lifecycle.releaseAbort(mcpDeck.abortCtrl);
+    }
+    const ctrl = lifecycle.trackAbort();
+    mcpDeck.abortCtrl = ctrl;
+    mcpDeck.loading = true;
+    mcpDeck.error = '';
+    renderMcpDeck();
+    try {
+      const out = await callLanguageServer('GetMcpServerStates', {}, { signal: ctrl.signal });
+      mcpDeck.states = Array.isArray(out && out.states) ? out.states : [];
+      mcpDeck.states.forEach((entry) => {
+        const spec = mcpSpec(entry);
+        const key = spec.serverName;
+        if (!key) return;
+        if (spec.disabled === true) mcpDeck.disabled.add(key);
+        else if (spec.disabled === false) mcpDeck.disabled.delete(key);
+      });
+      mcpDeck.error = '';
+      mcpDeck.fetchedAt = Date.now();
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      mcpDeck.error = error && error.message ? error.message : String(error);
+    } finally {
+      if (mcpDeck.abortCtrl === ctrl) {
+        mcpDeck.abortCtrl = null;
+        mcpDeck.loading = false;
+      }
+      lifecycle.releaseAbort(ctrl);
+      if (!lifecycle.disposed) renderMcpDeck();
+    }
+  }
+
+  async function reconnectMcp(state) {
+    const spec = mcpSpec(state);
+    mcpDeck.busy = spec.serverName;
+    mcpDeck.actionError = '';
+    renderMcpDeck();
+    const startedAt = Date.now();
+    try {
+      await callLanguageServer('RefreshMcpServers', { shallow: false, serverName: spec.serverName });
+      await loadMcpStates({ force: true });
+      const next = mcpDeck.states.find((entry) => mcpSpec(entry).serverName === spec.serverName);
+      const meta = mcpMeta(next || { status: '' });
+      const tools = next && Array.isArray(next.tools) ? next.tools.length : 0;
+      showToast(mcpLabel(next || state) + '：' + meta.label + ' · ' + tools + ' 工具 · ' + (Date.now() - startedAt) + 'ms');
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      const reason = error && error.message ? error.message : String(error);
+      mcpDeck.actionError = mcpLabel(state) + ' 重连失败：' + reason;
+      showToast('重连失败：' + reason);
+    } finally {
+      mcpDeck.busy = '';
+      if (!lifecycle.disposed) renderMcpDeck();
+    }
+  }
+
+  async function reconnectAllMcp() {
+    mcpDeck.busy = '__all__';
+    mcpDeck.actionError = '';
+    renderMcpDeck();
+    const startedAt = Date.now();
+    try {
+      await callLanguageServer('RefreshMcpServers', { shallow: false });
+      await loadMcpStates({ force: true });
+      const ready = mcpDeck.states.filter((entry) => entry.status === 'MCP_SERVER_STATUS_READY').length;
+      showToast('已重连全部 MCP：' + ready + '/' + mcpDeck.states.length + ' 就绪 · ' + (Date.now() - startedAt) + 'ms');
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      const reason = error && error.message ? error.message : String(error);
+      mcpDeck.actionError = '全部重连失败：' + reason;
+      showToast('重连失败：' + reason);
+    } finally {
+      mcpDeck.busy = '';
+      if (!lifecycle.disposed) renderMcpDeck();
+    }
+  }
+
+  async function setMcpEnabled(state, enabled) {
+    const spec = mcpSpec(state);
+    const key = spec.serverName;
+    const name = spec.originalServerName || spec.serverName;
+    mcpDeck.busy = key;
+    mcpDeck.actionError = '';
+    renderMcpDeck();
+    try {
+      await callLanguageServer('ToggleMcpServer', { serverName: name, enabled });
+      if (enabled) mcpDeck.disabled.delete(key);
+      else mcpDeck.disabled.add(key);
+      await loadMcpStates({ force: true });
+      showToast(mcpLabel(state) + (enabled ? ' 已启用' : ' 已停用'));
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+      const reason = error && error.message ? error.message : String(error);
+      mcpDeck.actionError = mcpLabel(state) + ' 切换失败：' + reason;
+      showToast('切换失败：' + reason);
+    } finally {
+      mcpDeck.busy = '';
+      if (!lifecycle.disposed) renderMcpDeck();
+    }
+  }
+
+  function mcpLineMarkup(label, value, mono) {
+    if (!value) return '';
+    return '<div class="ag-mcp-line"><span class="ag-mcp-key">' + escapeHtml(label) + '</span>' +
+      '<span class="ag-mcp-val' + (mono ? ' is-mono' : '') + '">' + escapeHtml(String(value)) + '</span></div>';
+  }
+
+  function mcpToolMarkup(tool, off) {
+    return '<div class="ag-mcp-tool' + (off ? ' is-off' : '') + '" role="button" tabindex="0" data-ag-mcp-tool="' + escapeHtml(tool.name) + '" title="' + escapeHtml(tool.description || '') + '">' +
+      '<span class="ag-mcp-tool-name">' + escapeHtml(tool.name) + '</span>' +
+      '<span class="ag-mcp-tool-desc">' + escapeHtml(tool.description || '') + '</span>' +
+      (off ? '<span class="ag-mcp-tool-flag">已停用</span>' : '') +
+      '</div>';
+  }
+
+  function mcpDetailMarkup(state) {
+    const spec = mcpSpec(state);
+    const tools = Array.isArray(state.tools) ? state.tools : [];
+    const off = new Set(Array.isArray(spec.disabledTools) ? spec.disabledTools : []);
+    const info = state.serverInfo || {};
+    const parts = [
+      '<div class="ag-mcp-lines">',
+      mcpRemote(spec)
+        ? mcpLineMarkup('地址', spec.serverUrl, true)
+        : mcpLineMarkup('命令', [spec.command].concat(spec.args || []).join(' '), true),
+      mcpLineMarkup('工作目录', spec.cwd, true),
+      mcpLineMarkup('环境变量', spec.env && Object.keys(spec.env).length ? Object.keys(spec.env).join(', ') : '', true),
+      mcpLineMarkup('配置', spec.configPath, true),
+      mcpLineMarkup('服务信息', [info.name, info.version].filter(Boolean).join(' · ')),
+      mcpLineMarkup('归属', mcpSource(spec) + (spec.pluginVersion ? ' · ' + spec.pluginVersion : '')),
+      '</div>'
+    ];
+    if (state.error) {
+      parts.push('<div class="ag-mcp-error">' + escapeHtml(String(state.error)) + '</div>');
+      if (state.authUrl) parts.push('<button type="button" class="ag-mcp-btn primary" data-ag-mcp-auth data-ag-action="auth-mcp">去授权</button>');
+    }
+    if (Array.isArray(state.toolErrors) && state.toolErrors.length) {
+      parts.push('<div class="ag-mcp-warn">' + state.toolErrors.length + ' 个工具名不符合命名规则，未被注册</div>');
+    }
+    if (state.instructions) {
+      parts.push('<div class="ag-mcp-notes">' + escapeHtml(String(state.instructions).slice(0, 400)) + '</div>');
+    }
+    if (spec.pluginName) {
+      parts.push('<div class="ag-mcp-hint">插件自带的 MCP 跟随插件启用状态，停用请关闭对应插件。</div>');
+    }
+    parts.push('<div class="ag-mcp-tools">' + (tools.length
+      ? tools.map((tool) => mcpToolMarkup(tool, off.has(tool.name))).join('')
+      : '<div class="ag-plugin-empty">没有可用工具</div>') + '</div>');
+    return parts.join('');
+  }
+
+  function mcpRowMarkup(state) {
+    const spec = mcpSpec(state);
+    const meta = mcpMeta(state);
+    const name = mcpLabel(state);
+    const key = spec.serverName || name;
+    const tools = Array.isArray(state.tools) ? state.tools : [];
+    const offCount = Array.isArray(spec.disabledTools) ? spec.disabledTools.length : 0;
+    const busy = mcpDeck.busy === key || mcpDeck.busy === '__all__';
+    const off = mcpDeck.disabled.has(key) || spec.disabled === true;
+    const summary = [
+      mcpSource(spec),
+      mcpRemote(spec) ? '远程' : '本地进程',
+      tools.length + ' 工具',
+      offCount ? offCount + ' 停用' : ''
+    ].filter(Boolean).join(' · ');
+    const spinning = busy ? ' is-spin' : '';
+    return [
+      '<div class="ag-mcp-entry' + (mcpDeck.expanded.has(key) ? ' is-open' : '') + (off ? ' is-off' : '') + '" data-ag-mcp-key="' + escapeHtml(key) + '">',
+      '<div class="ag-plugin-item ag-mcp-item" data-ag-panel-item="mcp" role="button" tabindex="0" title="' + escapeHtml(name + ' · ' + meta.label) + '">',
+      '<span class="ag-plugin-badge" style="--ag-plugin-color:' + MCP_TONE_COLORS[off ? 'disabled' : meta.tone] + '">' + escapeHtml(String(name).trim().charAt(0).toUpperCase()) + '</span>',
+      '<span class="ag-plugin-copy">',
+      '<span class="ag-plugin-name">' + escapeHtml(name) +
+        '<span class="ag-mcp-dot is-' + (off ? 'disabled' : meta.tone) + '"></span><span class="ag-mcp-state">' + (off ? '已停用' : meta.label) + '</span></span>',
+      '<span class="ag-plugin-desc">' + escapeHtml(summary) + '</span>',
+      '</span>',
+      '<span class="ag-mcp-actions">',
+      '<button type="button" class="ag-mcp-btn' + spinning + '" data-ag-mcp-reconnect data-ag-action="reconnect-mcp"' + (busy ? ' disabled' : '') + '>重连</button>',
+      spec.pluginName
+        ? '<button type="button" class="ag-mcp-btn" data-ag-mcp-folder data-ag-action="folder-mcp">目录</button>'
+        : '<button type="button" class="ag-mcp-btn" data-ag-mcp-disable' + (off ? '="on"' : '') + ' data-ag-action="toggle-mcp"' + (busy ? ' disabled' : '') + '>' + (off ? '启用' : '停用') + '</button>',
+      '</span>',
+      '</div>',
+      '<div class="ag-mcp-detail">' + mcpDetailMarkup(state) + '</div>',
+      '</div>'
+    ].join('');
+  }
+
+  function renderMcpDeck() {
+    const panel = getComposerPanel('mcp');
+    if (!panel) return;
+    const count = panel.querySelector('[data-ag-mcp-count]');
+    const bar = panel.querySelector('[data-ag-mcp-bar]');
+    const list = panel.querySelector('.ag-mcp-list');
+    if (count) count.textContent = String(mcpDeck.states.length);
+    if (bar) {
+      if (mcpDeck.loading || mcpDeck.busy) bar.textContent = mcpDeck.busy === '__all__' ? '正在重连全部 MCP…' : (mcpDeck.loading ? '正在读取本地 MCP 状态…' : '正在重连…');
+      else if (mcpDeck.error) bar.textContent = '读取失败：' + mcpDeck.error;
+      else if (!mcpDeck.states.length) bar.textContent = '没有已配置的 MCP 服务器';
+      else {
+        const ready = mcpDeck.states.filter((entry) => entry.status === 'MCP_SERVER_STATUS_READY').length;
+        const failed = mcpDeck.states.filter((entry) => entry.status === 'MCP_SERVER_STATUS_ERROR').length;
+        const tools = mcpDeck.states.reduce((sum, entry) => sum + ((entry.tools || []).length), 0);
+        bar.textContent = ready + ' 就绪' + (failed ? ' · ' + failed + ' 异常' : '') + ' · ' + tools + ' 工具 · ' + mcpTimeLabel(mcpDeck.fetchedAt);
+      }
+    }
+    if (!list) return;
+    const blocks = [];
+    if (mcpDeck.error) {
+      blocks.push(renderPanelBanner({
+        kind: 'error',
+        message: '读取 MCP 状态失败：' + mcpDeck.error,
+        retryAction: 'retry-mcp',
+        retryAttr: 'data-ag-mcp-reload',
+        retryLabel: '重试'
+      }));
+    } else if (mcpDeck.actionError) {
+      blocks.push(renderPanelBanner({
+        kind: 'error',
+        message: mcpDeck.actionError,
+        retryAction: 'retry-mcp',
+        retryAttr: 'data-ag-mcp-reload',
+        retryLabel: '刷新状态'
+      }));
+    }
+    if ((mcpDeck.loading || mcpDeck.busy) && !mcpDeck.states.length) {
+      blocks.push(renderPanelBanner({ kind: 'loading', message: '正在连接本地 MCP 服务…' }));
+      list.innerHTML = blocks.join('');
+      return;
+    }
+    if (!mcpDeck.states.length && !mcpDeck.error) {
+      list.innerHTML = '<div class="ag-plugin-empty">没有已配置的 MCP 服务器</div>';
+      return;
+    }
+    const sorted = mcpDeck.states.slice().sort((a, b) => mcpLabel(a).localeCompare(mcpLabel(b)));
+    blocks.push(sorted.map(mcpRowMarkup).join(''));
+    list.innerHTML = blocks.join('');
+  }
+
+  function mcpIconSvg() {
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 -960 960 960" fill="currentColor"><path d="M440-160v-234L338-496q-11-11-11-28t11-28q11-11 28.5-11t28.5 11l105 105q11 11 11 28v104h60v-80h140q17 0 28.5 11.5T750-354v154q0 17-11.5 28.5T710-160H440Zm-80-320q-17 0-28.5-11.5T320-560v-150q0-17 11.5-28.5T360-750h350q17 0 28.5 11.5T750-710v150q0 17-11.5 28.5T710-520H360Z"></path></svg>';
+  }
+
+  function buildMcpPanel() {
+    const panel = make('div', 'ag-plugin-panel ag-mcp-panel');
+    panel.id = 'ag-composer-panel-mcp';
+    panel.setAttribute('data-ag-panel-id', 'mcp');
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'MCP 连接');
+    panel.innerHTML = [
+      '<div class="ag-plugin-head">',
+      '<div class="ag-plugin-title"><span class="ag-plugin-mark">' + mcpIconSvg() + '</span><span>MCP 连接</span><span class="ag-plugin-count" data-ag-mcp-count>0</span></div>',
+      '<button type="button" class="ag-plugin-close" data-ag-mcp-close data-ag-action="close-panel" aria-label="关闭 MCP 面板">',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M256-226.23 226.23-256 480-522.15 733.77-256 704-226.23 480-480 256-226.23Z"></path></svg>',
+      '</button>',
+      '</div>',
+      '<div class="ag-mcp-bar">',
+      '<span class="ag-mcp-bar-text" data-ag-mcp-bar>正在读取本地 MCP 状态…</span>',
+      '<button type="button" class="ag-mcp-btn" data-ag-mcp-reload data-ag-action="reload-mcp">刷新</button>',
+      '<button type="button" class="ag-mcp-btn primary" data-ag-mcp-reconnect-all data-ag-action="reconnect-all-mcp">全部重连</button>',
+      '</div>',
+      '<div class="ag-plugin-list ag-mcp-list" role="group" aria-label="MCP 服务器"></div>',
+      '<button type="button" class="ag-plugin-create ag-mcp-footer" data-ag-mcp-add data-ag-action="add-mcp">',
+      '<span class="ag-plugin-create-plus">+</span><span>新增 MCP 服务器</span>',
+      '</button>'
+    ].join('');
+    return panel;
+  }
+
+  function setMcpPanelOpen(open) {
+    if (open) setActiveComposerPanel('mcp');
+    else closeSingleComposerPanel('mcp');
+  }
+
+  function mcpStateFromNode(node) {
+    const entry = node.closest?.('.ag-mcp-entry');
+    if (!entry) return null;
+    const key = entry.getAttribute('data-ag-mcp-key');
+    return mcpDeck.states.find((state) => (state.spec && state.spec.serverName) === key) || null;
+  }
+
+  function ensureMcpPanel() {
+    const composer = getComposer();
+    if (!composer) return;
+    const footer = composer.querySelector('[class*="input-footer"]');
+    if (!footer) return;
+
+    let trigger = getComposerTrigger('mcp');
+    if (!trigger) {
+      trigger = make('button', 'ag-plugin-trigger ag-mcp-trigger');
+      trigger.type = 'button';
+      trigger.title = 'MCP 连接状态';
+      trigger.setAttribute('aria-label', 'MCP 连接状态');
+      trigger.setAttribute('data-ag-panel', 'mcp');
+      trigger.setAttribute('data-ag-composer-action', 'toggle-panel');
+      trigger.setAttribute('aria-haspopup', 'dialog');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-controls', 'ag-composer-panel-mcp');
+      trigger.innerHTML = mcpIconSvg();
+      const promptTrigger = getComposerTrigger('prompts') || getComposerTrigger('plugins');
+      if (promptTrigger) promptTrigger.after(trigger);
+      else footer.prepend(trigger);
+    }
+
+    if (!getComposerPanel('mcp')) composer.appendChild(buildMcpPanel());
+  }
+
+  function handlePluginPanelClick(panel, target, event) {
+    const tab = target.closest?.('[data-ag-deck-tab]');
+    if (tab) {
+      event.preventDefault();
+      event.stopPropagation();
+      panel.dataset.deckTab = tab.getAttribute('data-ag-deck-tab') || 'plugins';
+      renderDeck(panel, panel.querySelector('.ag-plugin-search')?.value || '');
+      return true;
+    }
+
+    if (target.closest?.('[data-ag-action="reload-plugins"], [data-ag-action="retry-plugins"]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      void refreshPluginCatalog({ force: true });
+      return true;
+    }
+
+    const star = target.closest?.('[data-ag-deck-star]');
+    if (star) {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = star.getAttribute('data-ag-deck-star');
+      const favorites = readDeckFavorites();
+      if (favorites.has(key)) favorites.delete(key);
+      else favorites.add(key);
+      writeDeckFavorites(favorites);
+      renderDeck(panel, panel.querySelector('.ag-plugin-search')?.value || '');
+      return true;
+    }
+
+    const item = target.closest?.('[data-ag-panel-item="plugins"]');
+    if (item) {
+      event.preventDefault();
+      event.stopPropagation();
+      const skillName = item.getAttribute('data-skill-name');
+      if (skillName) {
+        const skill = SKILLS.find((entry) => entry.name === skillName);
+        if (skill) {
+          insertSkillTag(skill);
+          setActiveComposerPanel(null, { restoreFocus: false });
         }
+        return true;
+      }
+      const plugin = PLUGINS.find((entry) => entry.id === item.getAttribute('data-plugin-id'));
+      if (plugin) {
+        insertPluginTag(plugin);
+        setActiveComposerPanel(null, { restoreFocus: false });
+      }
+      return true;
+    }
 
-        insertPromptTemplate(preset.prompt);
-        setPromptPanelOpen(false);
-        return;
+    if (target.closest?.('[data-ag-action="create-plugin"]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      insertComposerText('请帮我创建一个新的 Antigravity 插件：');
+      setActiveComposerPanel(null, { restoreFocus: false });
+      return true;
+    }
+
+    return false;
+  }
+
+  function handlePromptPanelClick(panel, target, event) {
+    if (target.closest?.('[data-ag-action="retry-prompts"]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      void hydratePromptPresets({ force: true });
+      return true;
+    }
+
+    if (target.closest?.('[data-ag-action="retry-save-prompts"]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      void savePromptPresets(loadPromptPresets());
+      return true;
+    }
+
+    if (target.closest?.('[data-ag-prompt-new]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      showPromptForm(panel, null);
+      return true;
+    }
+
+    if (target.closest?.('[data-ag-prompt-cancel]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      hidePromptForm(panel);
+      return true;
+    }
+
+    const item = target.closest?.('[data-ag-panel-item="prompts"]');
+    if (item) {
+      event.preventDefault();
+      event.stopPropagation();
+      const id = item.getAttribute('data-ag-prompt-id');
+      const presets = loadPromptPresets();
+      const preset = presets.find((entry) => entry.id === id);
+      if (!preset) return true;
+
+      if (target.closest?.('[data-ag-prompt-delete]')) {
+        if (promptDeckState.confirmDeleteId !== id) {
+          promptDeckState.confirmDeleteId = id;
+          if (promptDeckState.confirmDeleteTimer) lifecycle.clearTimeout(promptDeckState.confirmDeleteTimer);
+          promptDeckState.confirmDeleteTimer = lifecycle.setTimeout(() => {
+            if (promptDeckState.confirmDeleteId === id) {
+              promptDeckState.confirmDeleteId = '';
+              renderPromptList(panel);
+            }
+          }, 3500);
+          renderPromptList(panel);
+          return true;
+        }
+        promptDeckState.confirmDeleteId = '';
+        if (promptDeckState.confirmDeleteTimer) {
+          lifecycle.clearTimeout(promptDeckState.confirmDeleteTimer);
+          promptDeckState.confirmDeleteTimer = 0;
+        }
+        const next = presets.filter((entry) => entry.id !== id);
+        void savePromptPresets(next);
+        renderPromptList(panel);
+        return true;
       }
 
-      if (!currentPanel.contains(event.target)) setPromptPanelOpen(false);
+      if (target.closest?.('[data-ag-prompt-edit]')) {
+        promptDeckState.confirmDeleteId = '';
+        showPromptForm(panel, preset);
+        return true;
+      }
+
+      promptDeckState.confirmDeleteId = '';
+      insertPromptTemplate(preset.prompt);
+      setActiveComposerPanel(null, { restoreFocus: false });
+      return true;
+    }
+
+    return false;
+  }
+
+  function handleMcpPanelClick(panel, target, event) {
+    if (target.closest?.('[data-ag-mcp-reload], [data-ag-action="retry-mcp"]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      void loadMcpStates({ force: true });
+      return true;
+    }
+
+    if (target.closest?.('[data-ag-mcp-reconnect-all]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      void reconnectAllMcp();
+      return true;
+    }
+
+    if (target.closest?.('[data-ag-mcp-add]')) {
+      event.preventDefault();
+      event.stopPropagation();
+      insertComposerText('请帮我在 Antigravity 里新增一个 MCP 服务器，先给出 mcp_config.json 的配置示例（本地 stdio 与远程 serverUrl 两种），再说明如何验证连接。');
+      setActiveComposerPanel(null, { restoreFocus: false });
+      return true;
+    }
+
+    const auth = target.closest?.('[data-ag-mcp-auth]');
+    if (auth) {
+      event.preventDefault();
+      event.stopPropagation();
+      const state = mcpStateFromNode(auth);
+      const url = state && state.authUrl;
+      if (!url) return true;
+      callLanguageServer('OpenUrl', { url }).catch((error) => showToast('无法打开授权地址：' + (error.message || error)));
+      return true;
+    }
+
+    const folder = target.closest?.('[data-ag-mcp-folder]');
+    if (folder) {
+      event.preventDefault();
+      event.stopPropagation();
+      const state = mcpStateFromNode(folder);
+      const pluginName = state && state.spec && state.spec.pluginName;
+      if (!pluginName) return true;
+      sidecarJson('/api/open-resource', { kind: 'plugin', id: pluginName })
+        .then((data) => showToast('已打开 ' + data.path))
+        .catch((error) => showToast('打开失败：' + (error.message || error)));
+      return true;
+    }
+
+    const reconnect = target.closest?.('[data-ag-mcp-reconnect]');
+    if (reconnect) {
+      event.preventDefault();
+      event.stopPropagation();
+      const state = mcpStateFromNode(reconnect);
+      if (state) void reconnectMcp(state);
+      return true;
+    }
+
+    const disable = target.closest?.('[data-ag-mcp-disable]');
+    if (disable) {
+      event.preventDefault();
+      event.stopPropagation();
+      const state = mcpStateFromNode(disable);
+      if (state) void setMcpEnabled(state, disable.getAttribute('data-ag-mcp-disable') === 'on');
+      return true;
+    }
+
+    const tool = target.closest?.('[data-ag-mcp-tool]');
+    if (tool) {
+      event.preventDefault();
+      event.stopPropagation();
+      const state = mcpStateFromNode(tool);
+      if (!state) return true;
+      insertComposerText('使用 MCP 工具 ' + mcpLabel(state) + '/' + tool.getAttribute('data-ag-mcp-tool') + '：');
+      setActiveComposerPanel(null, { restoreFocus: false });
+      return true;
+    }
+
+    const item = target.closest?.('[data-ag-panel-item="mcp"]');
+    if (item) {
+      event.preventDefault();
+      event.stopPropagation();
+      const entry = item.closest('.ag-mcp-entry');
+      const key = entry && entry.getAttribute('data-ag-mcp-key');
+      if (!key) return true;
+      if (mcpDeck.expanded.has(key)) mcpDeck.expanded.delete(key);
+      else mcpDeck.expanded.add(key);
+      renderMcpDeck();
+      return true;
+    }
+
+    return false;
+  }
+
+  function focusAdjacentPanelRow(panel, direction) {
+    if (!panel) return;
+    const items = Array.from(panel.querySelectorAll('[data-ag-panel-item], [data-ag-mcp-tool]')).filter((el) => !el.hidden && el.offsetParent !== null);
+    if (!items.length) return;
+    const current = document.activeElement?.closest?.('[data-ag-panel-item], [data-ag-mcp-tool]');
+    let index = current ? items.indexOf(current) : -1;
+    if (index === -1) index = direction > 0 ? 0 : items.length - 1;
+    else index = (index + direction + items.length) % items.length;
+    items[index]?.focus?.();
+  }
+
+  function installComposerController() {
+    if (composerControllerBound) return;
+    composerControllerBound = true;
+
+    lifecycle.addListener(window, 'pointerdown', (event) => {
+      const target = event.target;
+      if (!target) return;
+      if (target.closest?.('#antigravity\\.agentSidePanelInputBox [contenteditable="true"], #antigravity\\.agentSidePanelInputBox textarea') ||
+          target.closest?.('[data-ag-composer-action="toggle-panel"]')) {
+        captureComposerCaret();
+      }
     }, true);
 
-    document.addEventListener('submit', (event) => {
-      const form = event.target.closest?.('[data-ag-prompt-form]');
+    lifecycle.addListener(document, 'selectionchange', () => {
+      const editor = getComposerEditor();
+      if (!editor) return;
+      const active = document.activeElement;
+      if (active && (active === editor || editor.contains(active))) {
+        captureComposerCaret();
+      }
+    });
+
+    lifecycle.addListener(window, 'click', (event) => {
+      const target = event.target;
+      if (!target) return;
+
+      const trigger = target.closest?.('[data-ag-composer-action="toggle-panel"][data-ag-panel]');
+      if (trigger) {
+        event.preventDefault();
+        event.stopPropagation();
+        const panelId = trigger.getAttribute('data-ag-panel');
+        const fromKeyboard = event.detail === 0;
+        toggleComposerPanel(panelId, { restoreFocus: true, fromKeyboard });
+        return;
+      }
+
+      const openPanel = COMPOSER_PANEL_IDS.map(getComposerPanel).find((node) => node && node.classList.contains('is-open'));
+      if (!openPanel) return;
+
+      const insidePanel = target.closest?.('[data-ag-panel-id]');
+      if (insidePanel) {
+        event.stopPropagation();
+        const panelId = insidePanel.getAttribute('data-ag-panel-id');
+        if (target.closest?.('[data-ag-action="close-panel"]')) {
+          event.preventDefault();
+          setActiveComposerPanel(null, { restoreFocus: true });
+          return;
+        }
+        if (panelId === 'plugins') {
+          handlePluginPanelClick(insidePanel, target, event);
+        } else if (panelId === 'prompts') {
+          handlePromptPanelClick(insidePanel, target, event);
+        } else if (panelId === 'mcp') {
+          handleMcpPanelClick(insidePanel, target, event);
+        }
+        return;
+      }
+
+      // Click outside any open composer panel: close panel without swallowing host click.
+      setActiveComposerPanel(null, { restoreFocus: false });
+    }, true);
+
+    lifecycle.addListener(window, 'submit', (event) => {
+      const form = event.target?.closest?.('[data-ag-panel-id="prompts"] [data-ag-prompt-form]');
       if (!form) return;
       event.preventDefault();
       event.stopPropagation();
-      const panel = form.closest('.ag-prompt-panel');
+      const panel = form.closest('[data-ag-panel-id="prompts"]');
       if (!panel) return;
       const title = form.querySelector('[data-ag-prompt-title]')?.value.trim();
       const content = form.querySelector('[data-ag-prompt-content]')?.value.trim();
@@ -1652,19 +3057,69 @@
           prompt: content
         });
       }
-      savePromptPresets(presets);
       hidePromptForm(panel);
+      void savePromptPresets(presets);
       renderPromptList(panel);
     }, true);
 
-    document.addEventListener('keydown', (event) => {
-      if (event.key !== 'Escape') return;
-      const panel = getComposer()?.querySelector('.ag-prompt-panel');
-      if (!panel || !panel.classList.contains('is-open')) return;
+    lifecycle.addListener(window, 'input', (event) => {
+      const target = event.target;
+      if (!target) return;
+      if (target.closest?.('#antigravity\\.agentSidePanelInputBox [contenteditable="true"], #antigravity\\.agentSidePanelInputBox textarea')) {
+        window.__agLastEditorInputAt = Date.now();
+        captureComposerCaret();
+        return;
+      }
+      const search = target.closest?.('[data-ag-panel-id="plugins"] .ag-plugin-search');
+      if (!search) return;
       event.stopPropagation();
-      if (panel.classList.contains('is-managing')) hidePromptForm(panel);
-      else setPromptPanelOpen(false);
+      const panel = search.closest('[data-ag-panel-id="plugins"]');
+      if (panel) renderDeck(panel, search.value);
     }, true);
+
+    lifecycle.addListener(window, 'keydown', (event) => {
+      const openPanel = COMPOSER_PANEL_IDS.map(getComposerPanel).find((node) => node && node.classList.contains('is-open'));
+      if (!openPanel) return;
+      const panelId = openPanel.getAttribute('data-ag-panel-id');
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (panelId === 'prompts' && openPanel.classList.contains('is-managing')) {
+          hidePromptForm(openPanel);
+          return;
+        }
+        setActiveComposerPanel(null, { restoreFocus: true });
+        return;
+      }
+
+      const active = document.activeElement;
+      const inTextarea = Boolean(active && active.tagName === 'TEXTAREA');
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !inTextarea && openPanel.contains(active)) {
+        event.preventDefault();
+        event.stopPropagation();
+        focusAdjacentPanelRow(openPanel, event.key === 'ArrowDown' ? 1 : -1);
+        return;
+      }
+
+      if ((event.key === 'Enter' || event.key === ' ') && active) {
+        if (active.tagName === 'BUTTON' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') return;
+        const row = active.closest?.('[data-ag-panel-item], [data-ag-mcp-tool]');
+        if (!row || !openPanel.contains(row)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (panelId === 'plugins') handlePluginPanelClick(openPanel, row, event);
+        else if (panelId === 'prompts') handlePromptPanelClick(openPanel, row, event);
+        else if (panelId === 'mcp') handleMcpPanelClick(openPanel, row, event);
+      }
+    }, true);
+  }
+
+  function ensureComposerEntrances() {
+    ensurePluginPicker();
+    ensurePromptPresets();
+    ensureMcpPanel();
+    installComposerController();
   }
 
   function findPathInValue(value, depth) {
@@ -1827,18 +3282,18 @@
       document.removeEventListener('pointerdown', close, true);
       document.removeEventListener('keydown', close, true);
     };
-    window.setTimeout(() => {
-      document.addEventListener('pointerdown', close, true);
-      document.addEventListener('keydown', close, true);
+    lifecycle.setTimeout(() => {
+      lifecycle.addListener(document, 'pointerdown', close, true);
+      lifecycle.addListener(document, 'keydown', close, true);
     }, 0);
   }
 
   function ensureWindowMenu() {
     if (window.__agWindowMenuBound) return;
     window.__agWindowMenuBound = true;
-    document.addEventListener('click', (event) => {
+    lifecycle.addListener(document, 'click', (event) => {
       const button = event.target.closest?.('[data-testid="title-menu-bar-item"]');
-      if (!button || button.innerText.trim() !== 'Window') return;
+      if (!button || !/^(Window|窗口)$/i.test(button.innerText.trim())) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       showWindowMenu(button);
@@ -1940,7 +3395,7 @@
   function ensureFileContextMenu() {
     if (window.__agFileContextMenuBound) return;
     window.__agFileContextMenuBound = true;
-    document.addEventListener('contextmenu', (event) => {
+    lifecycle.addListener(document, 'contextmenu', (event) => {
       if (event.defaultPrevented) return;
       if (event.target.closest?.('#antigravity\\.agentSidePanelInputBox, [role="menu"], input, textarea')) return;
       const path = pathFromEvent(event.target);
@@ -1957,7 +3412,7 @@
   function articleText(article) {
     if (!article) return '';
     const clone = article.cloneNode(true);
-    clone.querySelectorAll('button, [role="button"], svg, [data-testid="worked-for-collapsible"]').forEach((node) => node.remove());
+    clone.querySelectorAll('button, [role="button"], svg, style, script, noscript, [data-testid="worked-for-collapsible"]').forEach((node) => node.remove());
     return (clone.innerText || '')
       .replace(/\r/g, '')
       .replace(/\n{3,}/g, '\n\n')
@@ -2043,7 +3498,7 @@
     }
     if (!input) return false;
     try {
-      const response = await fetch(SIDECAR + snapshot.url, { cache: 'no-store' });
+      const response = await fetch(SIDECAR + snapshot.url, { cache: 'no-store', headers: sidecarTokenHeader() });
       if (!response.ok) return false;
       const blob = await response.blob();
       const file = new File([blob], snapshot.name || 'branch_snapshot.md', { type: 'text/markdown' });
@@ -2275,7 +3730,7 @@
 
     if (!window.__agMessageActionsBound) {
       window.__agMessageActionsBound = true;
-      document.addEventListener('click', (event) => {
+      lifecycle.addListener(document, 'click', (event) => {
         const retry = event.target.closest?.('.ag-retry-message');
         if (retry) {
           event.preventDefault();
@@ -2469,7 +3924,7 @@
 
     if (window.__agConversationDownloadButtonBound) return;
     window.__agConversationDownloadButtonBound = true;
-    document.addEventListener('click', async (event) => {
+    lifecycle.addListener(document, 'click', async (event) => {
       const button = event.target.closest?.('.ag-conversation-download-button');
       if (!button) return;
       event.preventDefault();
@@ -2516,12 +3971,19 @@
   };
 
   function translateMenuLabels(menu) {
+    const cfg = window.__AG_CONFIG || {};
+    const wantZh = String(cfg.language || 'zh-CN').toLowerCase() !== 'en' && cfg.deepI18n !== false;
     menu.querySelectorAll('[role="menuitem"]').forEach((item) => {
       item.childNodes.forEach((node) => {
         if (node.nodeType !== 3) return;
-        const raw = node.textContent.trim();
+        if (node.__agMenuOrig === undefined) node.__agMenuOrig = node.textContent;
+        if (!wantZh) {
+          if (node.textContent !== node.__agMenuOrig) node.textContent = node.__agMenuOrig;
+          return;
+        }
+        const raw = String(node.__agMenuOrig || '').trim();
         const hit = AG_MENU_LABELS[raw];
-        if (hit) node.textContent = node.textContent.replace(raw, hit);
+        if (hit) node.textContent = node.__agMenuOrig.replace(raw, hit);
       });
     });
   }
@@ -2548,7 +4010,7 @@
   function ensureConversationDownloadMenu() {
     if (window.__agConversationDownloadBound) return;
     window.__agConversationDownloadBound = true;
-    document.addEventListener('click', (event) => {
+    lifecycle.addListener(document, 'click', (event) => {
       const trigger = event.target.closest?.('button[data-testid="conversation-kebab"]');
       if (!trigger) return;
       const row = trigger.closest('[data-testid="conversation-row-sidebar"]');
@@ -2571,7 +4033,8 @@
       if (attempt < 5) window.setTimeout(() => attachPluginLocationItem(attempt + 1), 80);
       return;
     }
-    if (menu.querySelector('.ag-plugin-open-location')) return;
+    if (menu.querySelector('.ag-plugin-open-location') || menu.querySelector('[data-ag-open-resource]')) return;
+    if (window.__agResourceActions) return;
     const template = menu.querySelector('[role="menuitem"]');
     if (!template) return;
     const item = template.cloneNode(false);
@@ -2587,14 +4050,9 @@
         showToast('无法确定插件目录');
         return;
       }
-      const path = 'C:\\Users\\25350\\.gemini\\config\\plugins\\' + pluginId + '\\plugin.json';
-      const uri = 'file:///' + path.replace(/\\/g, '/').replace(/^\/+/, '');
-      try {
-        window.electronNative?.revealInFilePicker(uri);
-        showToast('已打开插件所在位置');
-      } catch (error) {
-        showToast('打开插件文件夹失败');
-      }
+      sidecarJson('/api/open-resource', { kind: 'plugin', id: pluginId })
+        .then(() => showToast('已打开插件所在位置'))
+        .catch(() => showToast('打开插件文件夹失败'));
     });
     menu.appendChild(item);
   }
@@ -2602,7 +4060,7 @@
   function ensurePluginLocationMenu() {
     if (window.__agPluginLocationBound) return;
     window.__agPluginLocationBound = true;
-    document.addEventListener('click', (event) => {
+    lifecycle.addListener(document, 'click', (event) => {
       const trigger = event.target.closest?.('button[aria-label^="More actions for "]');
       if (!trigger) return;
       const card = trigger.closest('[data-testid="customization-card"]');
@@ -2705,7 +4163,7 @@
 
     if (window.__agSkillFolderBound) return;
     window.__agSkillFolderBound = true;
-    document.addEventListener('click', async (event) => {
+    lifecycle.addListener(document, 'click', async (event) => {
       const folder = event.target.closest?.('.ag-skill-folder');
       if (!folder) return;
       event.preventDefault();
@@ -2748,7 +4206,7 @@
   function installSectionTransitions() {
     if (window.__agSectionTransitionBound) return;
     window.__agSectionTransitionBound = true;
-    document.addEventListener('click', (event) => {
+    lifecycle.addListener(document, 'click', (event) => {
       if (window.__agSectionTransitionBypass) return;
       const button = event.target.closest?.('.bg-sidebar [data-testid="section-header"] h2 > button[aria-expanded]');
       if (!button || typeof document.startViewTransition !== 'function') return;
@@ -2783,7 +4241,7 @@
     if (window.__agProjectTransitionBound) return;
     window.__agProjectTransitionBound = true;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-    document.addEventListener('click', (event) => {
+    lifecycle.addListener(document, 'click', (event) => {
       if (window.__agProjectTransitionBypass) return;
       const button = event.target.closest?.('.bg-sidebar [data-testid="project-header"][aria-expanded]');
       if (!button || typeof document.startViewTransition !== 'function' || reduceMotion.matches) return;
@@ -2813,7 +4271,7 @@
   function sidecarJson(path, body) {
     return fetch(SIDECAR + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: Object.assign({ 'Content-Type': 'application/json' }, sidecarTokenHeader()),
       body: JSON.stringify(body || {})
     }).then(async (response) => {
       const data = await response.json().catch(() => ({}));
@@ -3050,9 +4508,24 @@
         const actionsRect = actions ? actions.getBoundingClientRect() : null;
         if (actionsRect && actionsRect.width > 0) contentRight = Math.max(contentRight, actionsRect.right);
       }
-      const left = contentRect
+      // 右侧悬浮的「总览 / 审核 / 文件…」面板 (overview-panel) 若与 minimap 水平相交，minimap 须让到面板左缘之外。
+      const MINIMAP_WIDTH = 24;
+      const SIDE_PANEL_GAP = 8;
+      let baseLeft = contentRect
         ? Math.round(Math.min(rect.right - 22, Math.max(rect.right - 26, contentRight + 9)))
         : Math.round(rect.right - 22);
+      const sidePanel = document.querySelector('[data-testid="overview-panel"], [data-testid="overview-panel-host-sibling"]');
+      if (sidePanel) {
+        const panelRect = sidePanel.getBoundingClientRect();
+        if (panelRect.width > 0 && panelRect.height > 0) {
+          const overlapsX = panelRect.left < baseLeft + MINIMAP_WIDTH && panelRect.right > baseLeft;
+          const overlapsY = panelRect.top < rect.bottom && panelRect.bottom > rect.top;
+          if (overlapsX && overlapsY) {
+            baseLeft = Math.round(panelRect.left - MINIMAP_WIDTH - SIDE_PANEL_GAP);
+          }
+        }
+      }
+      const left = baseLeft;
       node.dataset.geomAt = String(Math.round(now));
       node.dataset.sizeKey = sizeKey;
       node.dataset.trackHeight = String(Math.round(measured));
@@ -3125,14 +4598,14 @@
 
     if (!window.__agMinimapListBound) {
       window.__agMinimapListBound = true;
-      document.addEventListener('click', (event) => {
+      lifecycle.addListener(document, 'click', (event) => {
         if (event.target.closest?.('#ag-chat-minimap, #ag-minimap-list')) return;
         closeMinimapList();
       }, true);
-      document.addEventListener('keydown', (event) => {
+      lifecycle.addListener(document, 'keydown', (event) => {
         if (event.key === 'Escape') closeMinimapList();
       });
-      window.addEventListener('resize', () => {
+      lifecycle.addListener(window, 'resize', () => {
         const rail = document.getElementById('ag-chat-minimap');
         if (rail) rail.dataset.geomAt = '';
         const current = document.getElementById('ag-minimap-list');
@@ -3450,6 +4923,12 @@
       drawMeteors(dt);
       drawOrbit(now);
       drawBursts(dt);
+      if (document.documentElement.classList.contains('ag-right-reading') && window.__agRightReadingRect) {
+        const rr = window.__agRightReadingRect;
+        if (rr && rr.width > 0 && rr.height > 0) {
+          ctx.clearRect(Math.max(0, rr.left - 1), Math.max(0, rr.top - 1), rr.width + 2, rr.height + 2);
+        }
+      }
       raf = requestAnimationFrame(frame);
     }
 
@@ -3481,9 +4960,9 @@
 
     window.__agUpdateStarCosmos = sync;
     resize();
-    window.addEventListener('resize', resize, { passive: true });
-    document.addEventListener('visibilitychange', sync);
-    document.addEventListener('click', (event) => {
+    lifecycle.addListener(window, 'resize', resize, { passive: true });
+    lifecycle.addListener(document, 'visibilitychange', sync);
+    lifecycle.addListener(document, 'click', (event) => {
       const send = event.target.closest?.('[data-testid="send-button"], button[aria-label*="Send"], button[aria-label*="发送"]');
       if (!send) return;
       const rect = send.getBoundingClientRect();
@@ -3534,8 +5013,8 @@
     window.__agUpdatePromptSticky = updatePromptStuck;
     if (!promptStickyBound) {
       promptStickyBound = true;
-      document.addEventListener('scroll', schedulePromptStuck, true);
-      window.addEventListener('resize', schedulePromptStuck, { passive: true });
+      lifecycle.addListener(document, 'scroll', schedulePromptStuck, true);
+      lifecycle.addListener(window, 'resize', schedulePromptStuck, { passive: true });
     }
     updatePromptStuck();
   }
@@ -3556,21 +5035,46 @@
     window.setTimeout(tick, 280);
   }
 
-  async function switchEffort(level) {
+  async function switchEffort(targetOrIndex, opts = {}) {
     if (effortSwitching) return;
     const current = modelBaseFromTrigger();
     if (!current) {
       showToast('未识别当前模型');
       return;
     }
-    if (current.effort === level) return;
-    const isMenuOpen = () => getVisibleMenus().some((menu) => menu.querySelector('[data-testid="model-selector-panel"]'));
-    const menuWasOpen = isMenuOpen();
+    if (current.fixed) return;
+    const targetTier = typeof targetOrIndex === 'number'
+      ? current.tiers[Math.max(0, Math.min(current.tiers.length - 1, targetOrIndex))]
+      : (typeof targetOrIndex === 'object' && targetOrIndex !== null
+        ? current.tiers.find((t) => t.key === targetOrIndex.key) || targetOrIndex
+        : current.tiers.find((t) => t.key === normalizeEffortSpec(targetOrIndex).key));
+    if (!targetTier || targetTier.key === current.current.key) return;
+
     const pill = document.getElementById('ag-effort-pill');
     effortSwitching = true;
     pill?.classList.add('is-applying');
-    if (!menuWasOpen) document.documentElement.classList.add('ag-cloak-model-menu');
     document.documentElement.classList.add('ag-effort-switching');
+
+    // React Fiber 通道可用时直接切换模型档位，零闪烁不弹菜单
+    if (current.source === 'fiber' && current.ctx && typeof current.ctx.setSelectedModel === 'function' && targetTier.option) {
+      try {
+        current.ctx.setSelectedModel(targetTier.option);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        showToast('思考强度 · ' + targetTier.fullLabel);
+      } finally {
+        document.documentElement.classList.remove('ag-effort-switching');
+        effortSwitching = false;
+        pill?.classList.remove('is-applying');
+        stopEffortSpring(pill);
+        ensureEffortPill();
+        ensureModelEffort();
+      }
+      return;
+    }
+
+    const isMenuOpen = () => getVisibleMenus().some((menu) => menu.querySelector('[data-testid="model-selector-panel"]'));
+    const menuWasOpen = isMenuOpen() || !!opts.keepMenuOpen;
+    if (!menuWasOpen) document.documentElement.classList.add('ag-cloak-model-menu');
     const cloakTimer = window.setTimeout(() => {
       document.documentElement.classList.remove('ag-cloak-model-menu');
     }, 6000);
@@ -3582,7 +5086,7 @@
           await new Promise((resolve) => setTimeout(resolve, 40));
         }
       }
-      const success = await applyEffort(level, current.base);
+      const success = await applyEffort(targetTier, current.base);
       if (!success) {
         showToast('切换思考强度失败');
         return;
@@ -3590,7 +5094,7 @@
       await new Promise((resolve) => setTimeout(resolve, 260));
       if (!menuWasOpen) closeModelMenu();
       await new Promise((resolve) => setTimeout(resolve, 100));
-      showToast('思考强度 · ' + EFFORT_LABELS[level]);
+      showToast('思考强度 · ' + targetTier.fullLabel);
     } finally {
       window.clearTimeout(cloakTimer);
       if (!menuWasOpen) closeModelMenu();
@@ -3605,31 +5109,81 @@
     }
   }
 
+  function ratioTagForPos(pos) {
+    if (pos >= 0.9) return 'max';
+    if (pos >= 0.6) return 'high';
+    if (pos >= 0.3) return 'mid';
+    return 'low';
+  }
+
   function effortSliderMarkup(info) {
+    const tiers = info.tiers;
+    const count = tiers.length;
+    const max = Math.max(1, count - 1);
+    const pos = info.fixed ? 1 : (info.index / max);
+    const ticksHtml = tiers.map((tier, idx) =>
+      '<i data-index="' + idx + '"' + (idx <= info.index ? ' data-reached="true"' : '') + (idx === info.index ? ' data-active="true"' : '') + '></i>'
+    ).join('');
+    if (info.fixed) {
+      return [
+        '<span class="ag-effort-kicker">思考</span>',
+        '<span class="ag-effort-track" role="status" aria-label="思考强度固定档位" aria-disabled="true" data-fixed="true" data-tier-ratio="mid" style="--pos:1">',
+        '<span class="ag-effort-rail"></span>',
+        '<span class="ag-effort-fill"></span>',
+        '<span class="ag-effort-ticks">' + ticksHtml + '</span>',
+        '<span class="ag-effort-thumb"></span>',
+        '</span>',
+        '<span class="ag-effort-value">' + escapeHtml(info.current.label) + '</span>'
+      ].join('');
+    }
     return [
       '<span class="ag-effort-kicker">思考</span>',
-      '<span class="ag-effort-track" role="slider" tabindex="0" aria-label="思考强度" aria-valuemin="0" aria-valuemax="2" aria-valuenow="' + info.index + '" aria-valuetext="' + EFFORT_LABELS[info.effort] + '" style="--pos:' + (info.index / 2) + '">',
+      '<span class="ag-effort-track" role="slider" tabindex="0" aria-label="思考强度" aria-valuemin="0" aria-valuemax="' + max + '" aria-valuenow="' + info.index + '" aria-valuetext="' + escapeHtml(info.current.fullLabel) + '" data-tier-count="' + count + '" data-tier-ratio="' + ratioTagForPos(pos) + '" style="--pos:' + pos + '">',
       '<span class="ag-effort-rail"></span>',
       '<span class="ag-effort-fill"></span>',
-      '<span class="ag-effort-ticks"><i></i><i></i><i></i></span>',
+      '<span class="ag-effort-ticks">' + ticksHtml + '</span>',
       '<span class="ag-effort-thumb"></span>',
       '</span>',
-      '<span class="ag-effort-value">' + EFFORT_LABELS[info.effort] + '</span>'
+      '<span class="ag-effort-value">' + escapeHtml(info.current.label) + '</span>'
     ].join('');
   }
 
-  function setEffortVisual(pill, pos) {
+  function syncEffortMetadata(pill, levelIndex, posRatio) {
     const track = pill?.querySelector('.ag-effort-track');
-    if (!track) return 0;
+    const info = pill?.__agEffortInfo;
+    if (!track || !info || !info.tiers.length) return 0;
+    const max = Math.max(1, info.tiers.length - 1);
+    const clampedIndex = Math.max(0, Math.min(max, Number(levelIndex) || 0));
+    const tier = info.tiers[clampedIndex];
+    const value = pill.querySelector('.ag-effort-value');
+    if (value && tier) value.textContent = tier.label;
+    track.setAttribute('aria-valuenow', String(clampedIndex));
+    if (tier) track.setAttribute('aria-valuetext', tier.fullLabel);
+    track.dataset.level = String(clampedIndex);
+    track.dataset.tierRatio = ratioTagForPos(posRatio !== undefined ? posRatio : (info.fixed ? 1 : clampedIndex / max));
+    track.querySelectorAll('.ag-effort-ticks i').forEach((node, idx) => {
+      if (idx <= clampedIndex) node.setAttribute('data-reached', 'true');
+      else node.removeAttribute('data-reached');
+      if (idx === clampedIndex) node.setAttribute('data-active', 'true');
+      else node.removeAttribute('data-active');
+    });
+    return clampedIndex;
+  }
+
+  function setEffortVisual(pill, pos, visualOnly = false) {
+    const track = pill?.querySelector('.ag-effort-track');
+    const info = pill?.__agEffortInfo;
+    if (!track || !info || !info.tiers.length) return 0;
+    if (info.fixed) {
+      track.style.setProperty('--pos', '1');
+      return visualOnly ? 0 : syncEffortMetadata(pill, 0, 1);
+    }
+    const max = Math.max(1, info.tiers.length - 1);
     const clamped = Math.max(0, Math.min(1, Number(pos) || 0));
     track.style.setProperty('--pos', String(clamped));
-    const levelIndex = Math.max(0, Math.min(2, Math.round(clamped * 2)));
-    const value = pill.querySelector('.ag-effort-value');
-    if (value) value.textContent = EFFORT_LABELS[EFFORTS[levelIndex]];
-    track.setAttribute('aria-valuenow', String(levelIndex));
-    track.setAttribute('aria-valuetext', EFFORT_LABELS[EFFORTS[levelIndex]]);
-    track.dataset.level = String(levelIndex);
-    return levelIndex;
+    if (visualOnly) return Math.max(0, Math.min(max, Math.round(clamped * max)));
+    const levelIndex = Math.max(0, Math.min(max, Math.round(clamped * max)));
+    return syncEffortMetadata(pill, levelIndex, clamped);
   }
 
   function stopEffortSpring(pill) {
@@ -3643,14 +5197,15 @@
     pill.__agEffortSpringing = false;
   }
 
-  function animateEffortTo(pill, targetPos) {
+  function animateEffortTo(pill, targetPos, visualOnly = false) {
     const track = pill?.querySelector('.ag-effort-track');
     if (!track) return;
     stopEffortSpring(pill);
     let pos = parseFloat(track.style.getPropertyValue('--pos'));
     if (!Number.isFinite(pos)) pos = targetPos;
-    if (Math.abs(pos - targetPos) < 0.004) {
-      setEffortVisual(pill, targetPos);
+    const reduceMotion = document.hidden || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    if (reduceMotion || Math.abs(pos - targetPos) < 0.004) {
+      setEffortVisual(pill, targetPos, visualOnly);
       return;
     }
     let velocity = 0;
@@ -3661,8 +5216,9 @@
     pill.__agSpringWatchdog = window.setTimeout(() => {
       if (!pill.__agEffortSpringing) return;
       stopEffortSpring(pill);
+      setEffortVisual(pill, targetPos, visualOnly);
       ensureEffortPill();
-    }, 1400);
+    }, 900);
     const tick = (now) => {
       const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
       last = now;
@@ -3677,29 +5233,47 @@
         if (velocity > 0) velocity = 0;
       }
       if (Math.abs(pos - targetPos) < 0.0008 && Math.abs(velocity) < 0.02) {
-        setEffortVisual(pill, targetPos);
+        setEffortVisual(pill, targetPos, visualOnly);
         stopEffortSpring(pill);
         pill.__agPosRaf = 0;
         return;
       }
-      setEffortVisual(pill, pos);
+      setEffortVisual(pill, pos, visualOnly);
       pill.__agPosRaf = requestAnimationFrame(tick);
     };
     pill.__agPosRaf = requestAnimationFrame(tick);
   }
 
   function setEffortSliderVisual(pill, index) {
-    animateEffortTo(pill, index / 2);
+    const info = pill?.__agEffortInfo;
+    if (!info || info.fixed) {
+      if (pill) pill.dataset.targetIndex = '0';
+      setEffortVisual(pill, 1);
+      return;
+    }
+    const max = Math.max(1, info.tiers.length - 1);
+    const clamped = Math.max(0, Math.min(max, Number(index) || 0));
+    const targetPos = clamped / max;
+    pill.dataset.targetIndex = String(clamped);
+    // Commit label, ticks, and ARIA state immediately so throttled/hidden tabs never show stale tier text
+    syncEffortMetadata(pill, clamped, targetPos);
+    animateEffortTo(pill, targetPos, true);
   }
 
   function bindEffortSlider(pill) {
     const track = pill.querySelector('.ag-effort-track');
-    if (!track) return;
+    if (!track || track.__agBound) return;
+    track.__agBound = true;
     let activePointer = null;
+
+    if (pill.__agTrackResizeObserver) {
+      try { pill.__agTrackResizeObserver.disconnect(); } catch (error) {}
+      pill.__agTrackResizeObserver = null;
+    }
 
     const updateTravel = () => {
       const width = track.getBoundingClientRect().width;
-      track.style.setProperty('--track-travel', Math.max(0, width - 10) + 'px');
+      track.style.setProperty('--track-travel', Math.max(0, width - 12) + 'px');
     };
     updateTravel();
     if (typeof ResizeObserver === 'function') {
@@ -3710,7 +5284,7 @@
     const updateFromPointer = (event) => {
       const rect = track.getBoundingClientRect();
       if (!rect.width) return 0;
-      const pad = 5;
+      const pad = 6;
       const travel = Math.max(1, rect.width - pad * 2);
       const pos = Math.max(0, Math.min(1, (event.clientX - rect.left - pad) / travel));
       setEffortVisual(pill, pos);
@@ -3718,6 +5292,8 @@
     };
 
     track.addEventListener('pointerdown', (event) => {
+      const liveInfo = pill.__agEffortInfo;
+      if (!liveInfo || liveInfo.fixed) return;
       if (typeof event.button === 'number' && event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -3746,13 +5322,17 @@
         try { track.releasePointerCapture(activePointer); } catch (error) {}
         activePointer = null;
       }
-      const currentPos = parseFloat(track.style.getPropertyValue('--pos')) || 0;
-      const index = Math.max(0, Math.min(2, Math.round(currentPos * 2)));
       track.classList.remove('is-dragging');
-      animateEffortTo(pill, index / 2);
-      const current = modelBaseFromTrigger();
-      if (current && current.effort !== EFFORTS[index]) {
-        switchEffort(EFFORTS[index]).catch(() => {});
+      const liveInfo = pill.__agEffortInfo || modelBaseFromTrigger();
+      if (!liveInfo || liveInfo.fixed) return;
+      const max = Math.max(1, liveInfo.tiers.length - 1);
+      const currentPos = parseFloat(track.style.getPropertyValue('--pos')) || 0;
+      const index = Math.max(0, Math.min(max, Math.round(currentPos * max)));
+      setEffortSliderVisual(pill, index);
+      const targetTier = liveInfo.tiers[index];
+      const latest = modelBaseFromTrigger();
+      if (targetTier && latest && latest.current.key !== targetTier.key) {
+        switchEffort(targetTier).catch(() => {});
       }
     };
 
@@ -3761,19 +5341,24 @@
     track.addEventListener('click', (event) => event.stopPropagation());
 
     track.addEventListener('keydown', (event) => {
-      const currentIndex = Number(track.getAttribute('aria-valuenow') || 2);
+      const liveInfo = pill.__agEffortInfo || modelBaseFromTrigger();
+      if (!liveInfo || liveInfo.fixed) return;
+      const max = Math.max(1, liveInfo.tiers.length - 1);
+      const currentIndex = Number(track.getAttribute('aria-valuenow') ?? liveInfo.index);
       let next = currentIndex;
       if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next = currentIndex - 1;
       else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next = currentIndex + 1;
       else if (event.key === 'Home') next = 0;
-      else if (event.key === 'End') next = 2;
+      else if (event.key === 'End') next = max;
       else return;
       event.preventDefault();
       event.stopPropagation();
-      next = Math.max(0, Math.min(2, next));
+      next = Math.max(0, Math.min(max, next));
       setEffortSliderVisual(pill, next);
-      if (modelBaseFromTrigger()?.effort !== EFFORTS[next]) {
-        switchEffort(EFFORTS[next]).catch(() => {});
+      const targetTier = liveInfo.tiers[next];
+      const latest = modelBaseFromTrigger();
+      if (targetTier && latest && latest.current.key !== targetTier.key) {
+        switchEffort(targetTier).catch(() => {});
       }
     });
   }
@@ -3781,8 +5366,9 @@
   function stabilizeEffortTriggerWidth(info) {
     const trigger = getModelTrigger();
     if (!trigger || !info) return;
-    if (trigger.__agEffortBase === info.base) return;
-    trigger.__agEffortBase = info.base;
+    const sig = info.base + '|' + info.tiers.map((t) => t.triggerSuffix).join(',');
+    if (trigger.__agEffortSig === sig) return;
+    trigger.__agEffortSig = sig;
     trigger.style.minWidth = '';
     let maxWidth = 0;
     let currentWidth = 0;
@@ -3792,8 +5378,8 @@
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       ctx.font = [style.fontStyle, style.fontWeight, style.fontSize, style.fontFamily].join(' ');
-      maxWidth = Math.max.apply(null, EFFORTS.map((effort) => ctx.measureText(info.base + ' ' + effort).width));
-      currentWidth = ctx.measureText(info.base + ' ' + info.effort).width;
+      maxWidth = Math.max.apply(null, info.tiers.map((t) => ctx.measureText(info.base + ' ' + t.triggerSuffix).width));
+      currentWidth = ctx.measureText(info.base + ' ' + info.current.triggerSuffix).width;
     } catch (error) {
       return;
     }
@@ -3820,19 +5406,34 @@
       pill = document.createElement('div');
       pill.id = 'ag-effort-pill';
     }
-    if (!pill.querySelector('.ag-effort-track')) {
+    const tierSig = info.base + '|' + info.tiers.map((t) => t.key).join(',');
+    pill.__agEffortInfo = info;
+    if (info.fixed) pill.setAttribute('data-fixed', 'true');
+    else pill.removeAttribute('data-fixed');
+
+    if (!pill.querySelector('.ag-effort-track') || pill.dataset.tierSig !== tierSig) {
+      pill.dataset.tierSig = tierSig;
+      stopEffortSpring(pill);
       pill.innerHTML = effortSliderMarkup(info);
-    }
-    if (!pill.__agSmoothBound) {
-      pill.__agSmoothBound = true;
       bindEffortSlider(pill);
+    }
+    if (!pill.__agPillStopBound) {
+      pill.__agPillStopBound = true;
       pill.addEventListener('pointerdown', (event) => event.stopPropagation());
     }
     const host = trigger.closest('.no-focus-agent-input') || trigger.parentElement;
     if (host && pill.previousElementSibling !== host) host.after(pill);
     if (pill.__agEffortSpringing && !pill.__agPosRaf) pill.__agEffortSpringing = false;
-    if (!effortSwitching && !effortDragging && !pill.__agEffortSpringing) setEffortSliderVisual(pill, info.index);
-    pill.title = '思考强度：拖动切换（低 / 中 / 高），Alt+1/2/3 快捷键';
+    if (!effortSwitching && !effortDragging && (!pill.__agEffortSpringing || pill.dataset.targetIndex !== String(info.index))) {
+      setEffortSliderVisual(pill, info.index);
+    }
+    if (info.fixed) {
+      pill.title = info.base + '：固定思考强度（' + info.current.fullLabel + '）';
+    } else {
+      const names = info.tiers.map((t) => t.label).join(' / ');
+      const maxKey = Math.min(info.tiers.length, 9);
+      pill.title = info.base + ' · 思考强度（' + names + '），拖动或 Alt+1~' + maxKey + ' 切换';
+    }
   }
 
   let immersiveBound = false;
@@ -3858,19 +5459,21 @@
     if (host && button.parentElement !== host) host.insertBefore(button, anchor);
     if (immersiveBound) return;
     immersiveBound = true;
-    document.addEventListener('keydown', (event) => {
+    lifecycle.addListener(document, 'keydown', (event) => {
       if (event.altKey && !event.ctrlKey && !event.metaKey && (event.code === 'KeyZ' || event.key.toLowerCase() === 'z')) {
         event.preventDefault();
         event.stopPropagation();
         toggleImmersive();
       }
-      if (event.altKey && !event.ctrlKey && !event.metaKey && /^Digit[1-3]$/.test(event.code)) {
+      if (event.altKey && !event.ctrlKey && !event.metaKey && /^Digit[1-9]$/.test(event.code)) {
+        const info = modelBaseFromTrigger();
+        const index = Number(event.code.slice(-1)) - 1;
+        if (!info || info.fixed || index < 0 || index >= info.tiers.length) return;
         event.preventDefault();
         event.stopPropagation();
-        const index = Number(event.code.slice(-1)) - 1;
         const pill = document.getElementById('ag-effort-pill');
         if (pill) setEffortSliderVisual(pill, index);
-        switchEffort(EFFORTS[index]).catch(() => {});
+        switchEffort(info.tiers[index]).catch(() => {});
       }
     }, true);
     document.addEventListener('pointerover', (event) => {
@@ -3926,7 +5529,7 @@
     banner.classList.add('is-visible');
     window.clearTimeout(showQuestBanner.timer);
     showQuestBanner.timer = window.setTimeout(() => banner.classList.remove('is-visible'), 3600);
-    playQuestChime();
+    if (window.__AG_CONFIG?.questChime === true) playQuestChime();
   }
 
   function installQuestMonitor() {
@@ -3958,32 +5561,145 @@
     }, 700);
   }
 
+  const scanSteps = [
+    ensureUsagePanel,
+    ensureComposerEntrances,
+    ensureConversationActions,
+    ensureSidebarHandle,
+    ensureWindowMenu,
+    ensureFileContextMenu,
+    ensureCustomizationsPage,
+    ensureConversationDownloadMenu,
+    ensureConversationDownloadButton,
+    ensureMenuSweep,
+    enhanceSkillCards,
+    installSectionTransitions,
+    installProjectTransitions,
+    installEffortMenuGuard,
+    ensureModelEffort,
+    ensureChatMinimap,
+    ensureGlobalStarfield,
+    ensureStarCosmos,
+    () => ensureRightReadingMask(),
+    ensurePromptStickyMode,
+    ensureEffortPill,
+    ensureImmersiveToggle,
+    installQuestMonitor
+  ];
+
+  let readingMaskBound = false;
+  let readingMaskObserver = null;
+  let readingMaskObservedEl = null;
+
+  function findVisibleReadingPane() {
+    const candidates = document.querySelectorAll(
+      '[data-side-panel-open="true"] > [data-side-panel-focus-scope="true"], [data-aux-pane-focus-scope="true"]'
+    );
+    for (const el of candidates) {
+      if (!(el instanceof HTMLElement)) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= 80 && rect.height >= 80) {
+        return { el, rect };
+      }
+    }
+    return null;
+  }
+
+  function updateReadingOverlayMask() {
+    const enabled = document.documentElement.classList.contains('ag-right-reading');
+    const found = enabled ? findVisibleReadingPane() : null;
+    const starsEl = document.getElementById('ag-global-stars');
+    const cosmosEl = document.getElementById('ag-star-cosmos');
+
+    if (!found) {
+      if (readingMaskObserver && readingMaskObservedEl) {
+        try { readingMaskObserver.disconnect(); } catch (_) {}
+        readingMaskObservedEl = null;
+      }
+      if (window.__agRightReadingRect) {
+        delete window.__agRightReadingRect;
+      }
+      for (const overlay of [starsEl, cosmosEl]) {
+        if (overlay && (overlay.style.clipPath || overlay.style.webkitClipPath)) {
+          overlay.style.clipPath = '';
+          overlay.style.webkitClipPath = '';
+        }
+      }
+      if (starsEl) {
+        for (const star of starsEl.querySelectorAll('i')) {
+          if (star.style.visibility === 'hidden') star.style.visibility = '';
+        }
+      }
+      return;
+    }
+
+    const { el, rect } = found;
+    if (!readingMaskObserver && typeof ResizeObserver === 'function') {
+      readingMaskObserver = new ResizeObserver(() => updateReadingOverlayMask());
+    }
+    if (readingMaskObserver && readingMaskObservedEl !== el) {
+      try { readingMaskObserver.disconnect(); } catch (_) {}
+      readingMaskObservedEl = el;
+      try { readingMaskObserver.observe(el); } catch (_) {}
+    }
+
+    const left = Math.max(0, Math.round(rect.left));
+    const top = Math.max(0, Math.round(rect.top));
+    const right = Math.max(left, Math.round(rect.right));
+    const bottom = Math.max(top, Math.round(rect.bottom));
+    window.__agRightReadingRect = {
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top
+    };
+
+    const nextClip = `polygon(evenodd, 0px 0px, 100% 0px, 100% 100%, 0px 100%, 0px 0px, ${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px, ${left}px ${top}px)`;
+    for (const overlay of [starsEl, cosmosEl]) {
+      if (overlay) {
+        if (overlay.style.clipPath !== nextClip) overlay.style.clipPath = nextClip;
+        if (overlay.style.webkitClipPath !== nextClip) overlay.style.webkitClipPath = nextClip;
+      }
+    }
+    if (starsEl) {
+      for (const star of starsEl.querySelectorAll('i')) {
+        const sr = star.getBoundingClientRect();
+        const overlaps = sr.right > left && sr.left < right && sr.bottom > top && sr.top < bottom;
+        const nextVis = overlaps ? 'hidden' : '';
+        if (star.style.visibility !== nextVis) star.style.visibility = nextVis;
+      }
+    }
+  }
+
+  function ensureRightReadingMask() {
+    window.__agUpdateReadingMask = updateReadingOverlayMask;
+    if (!readingMaskBound) {
+      readingMaskBound = true;
+      lifecycle.addListener(document, 'ag-config-updated', updateReadingOverlayMask);
+      lifecycle.addListener(window, 'resize', updateReadingOverlayMask);
+      lifecycle.onDispose(() => {
+        if (readingMaskObserver) {
+          try { readingMaskObserver.disconnect(); } catch (_) {}
+          readingMaskObserver = null;
+        }
+        readingMaskObservedEl = null;
+        readingMaskBound = false;
+      });
+    }
+    updateReadingOverlayMask();
+  }
+
   function scan() {
     if (window.__agUiDisabled) return;
     scanCount += 1;
-    ensureUsagePanel();
-    ensurePluginPicker();
-    ensurePromptPresets();
-    ensureConversationActions();
-    ensureSidebarHandle();
-    ensureWindowMenu();
-    ensureFileContextMenu();
-    ensureCustomizationsPage();
-    ensureConversationDownloadMenu();
-    ensureConversationDownloadButton();
-    ensureMenuSweep();
-    enhanceSkillCards();
-    installSectionTransitions();
-    installProjectTransitions();
-    installEffortMenuGuard();
-    ensureModelEffort();
-    ensureChatMinimap();
-    ensureGlobalStarfield();
-    ensureStarCosmos();
-    ensurePromptStickyMode();
-    ensureEffortPill();
-    ensureImmersiveToggle();
-    installQuestMonitor();
+    // Isolate each enhancement step so one panel DOM change never blocks the composer effort bar
+    for (const step of scanSteps) {
+      try { step(); } catch (error) {}
+    }
   }
 
   function scheduleScan() {
@@ -4007,7 +5723,8 @@
     return false;
   }
 
-  const observer = new MutationObserver((mutations) => {
+  const starBus = window.__agStarlightBus;
+  const observer = starBus ? null : new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       if (!shouldIgnoreMutation(mutation)) {
         scheduleScan();
@@ -4015,20 +5732,37 @@
       }
     }
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-  window.addEventListener('resize', scheduleScan, { passive: true });
+  if (starBus) {
+    const unsubStarMut = starBus.onMutation('ui-enhance', scheduleScan, shouldIgnoreMutation);
+    if (typeof unsubStarMut === 'function') lifecycle.onDispose(unsubStarMut);
+  } else {
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  }
+  lifecycle.addListener(window, 'resize', scheduleScan, { passive: true });
 
   window.__agExtendedUiRefresh = scan;
   window.__agPerf = { scans: () => scanCount };
   scan();
+  window.__agRestoreReloadDraft?.();
   hydratePromptPresets();
-  window.setTimeout(scan, 300);
-  window.setTimeout(scan, 1200);
-  const maintenanceTimer = window.setInterval(() => {
+  lifecycle.setTimeout(scan, 300);
+  lifecycle.setTimeout(scan, 1200);
+  if (window.__agDirtyDocument && location.protocol === 'https:' && window.__AG_SIDECAR_PORT) {
+    lifecycle.setInterval(() => {
+      if (!window.__agDirtyDocument || window.__agUiDisabled) return;
+      if (window.sessionStorage?.getItem('ag-clean-reload-version') === UI_VERSION) return;
+      if (window.sessionStorage?.getItem('ag-clean-reload-deferred-fired') === UI_VERSION) return;
+      const busyBtn = document.querySelector('button[aria-label*="Stop execution" i], button[aria-label*="Cancel (Ctrl+D)" i]');
+      if (busyBtn) return;
+      if (Date.now() - (window.__agLastEditorInputAt || 0) < 1800) return;
+      try { window.sessionStorage?.setItem('ag-clean-reload-deferred-fired', UI_VERSION); } catch (error) {}
+      fetch(SIDECAR + '/api/apply', { method: 'POST', headers: sidecarTokenHeader() }).catch(() => {});
+    }, 2500);
+  }
+  const runMaintenance = () => {
     if (window.__agUiDisabled) return;
     ensureUsagePanel();
-    ensurePluginPicker();
-    ensurePromptPresets();
+    ensureComposerEntrances();
     ensureConversationActions();
     ensureSidebarHandle();
     ensureWindowMenu();
@@ -4045,10 +5779,70 @@
     const panel = document.getElementById('ag-usage-panel');
     if (panel) renderUsage(panel);
     loadUsage(false);
-  }, 30000);
+  };
+  const maintenanceTimer = starBus
+    ? starBus.onTick('ui-enhance-maintenance', 30000, runMaintenance)
+    : window.setInterval(runMaintenance, 30000);
 
   window.__agUiPause = () => {
     window.__agUiDisabled = true;
   };
-  window.__agUiDispose = window.__agUiPause;
+  window.__agUiDispose = () => {
+    window.__agUiDisabled = true;
+    if (scanTimer) window.clearTimeout(scanTimer);
+    scanTimer = 0;
+    if (observer) observer.disconnect();
+    if (starBus && typeof maintenanceTimer === 'function') maintenanceTimer();
+    else window.clearInterval(maintenanceTimer);
+    if (window.__agQuestTimer) {
+      window.clearInterval(window.__agQuestTimer);
+      delete window.__agQuestTimer;
+    }
+    lifecycle.disposeAll();
+    composerControllerBound = false;
+    readingMaskBound = false;
+    if (readingMaskObserver) {
+      try { readingMaskObserver.disconnect(); } catch (_) {}
+      readingMaskObserver = null;
+    }
+    readingMaskObservedEl = null;
+    for (const overlay of [document.getElementById('ag-global-stars'), document.getElementById('ag-star-cosmos')]) {
+      if (overlay) {
+        overlay.style.clipPath = '';
+        overlay.style.webkitClipPath = '';
+      }
+    }
+    const starsEl = document.getElementById('ag-global-stars');
+    if (starsEl) {
+      for (const star of starsEl.querySelectorAll('i')) {
+        if (star.style.visibility === 'hidden') star.style.visibility = '';
+      }
+    }
+    document.querySelectorAll('[data-ag-composer-action="toggle-panel"], [data-ag-panel-id]').forEach((node) => node.remove());
+    document.getElementById('ag-effort-pill')?.remove();
+    document.querySelectorAll('.ag-model-effort').forEach((node) => node.remove());
+    const boundFlags = [
+      '__agModelRowSelectionBound',
+      '__agEffortMenuGuard',
+      '__agWindowMenuBound',
+      '__agFileContextMenuBound',
+      '__agMessageActionsBound',
+      '__agConversationDownloadButtonBound',
+      '__agConversationDownloadBound',
+      '__agPluginLocationBound',
+      '__agSkillFolderBound',
+      '__agSectionTransitionBound',
+      '__agProjectTransitionBound',
+      '__agMinimapListBound',
+      '__agQuestMonitor'
+    ];
+    boundFlags.forEach((flag) => { try { delete window[flag]; } catch (error) {} });
+    delete window.__agExtendedUiInstalled;
+    delete window.__agExtendedUiVersion;
+    delete window.__agExtendedUiRefresh;
+    delete window.__agUiCleanLifecycle;
+    delete window.__agRestoreReloadDraft;
+    delete window.__agUpdateReadingMask;
+    delete window.__agRightReadingRect;
+  };
 })();

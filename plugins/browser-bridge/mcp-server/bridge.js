@@ -28,7 +28,7 @@ class BridgeError extends Error {
 class Bridge {
   constructor(opts = {}) {
     this.host = opts.host || "127.0.0.1";
-    this.port = Number(opts.port || 8765);
+    this.port = Number(opts.port || 8767);
     this.token = opts.token || "";
     this.log = opts.log || (() => {});
     this.onChange = opts.onChange || (() => {});
@@ -69,6 +69,23 @@ class Bridge {
 
       server.on("error", fail);
       server.on("upgrade", (req, socket, head) => {
+        const remote = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : "";
+        if (!isLoopback(remote) || !isLoopbackHostHeader(req.headers.host)) {
+          try {
+            socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+          } catch (e) { /* ignore */ }
+          socket.destroy();
+          return;
+        }
+        const origin = String(req.headers.origin || "").trim();
+        if (origin && !/^(chrome-extension|edge-extension|moz-extension|extension):\/\/[a-z0-9._-]+$/i.test(origin)) {
+          this.log("拒绝非法 Origin 的 WebSocket 连接：" + origin);
+          try {
+            socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+          } catch (e) { /* ignore */ }
+          socket.destroy();
+          return;
+        }
         let pathname = "";
         try { pathname = new URL(req.url || "/", "http://127.0.0.1").pathname; } catch (e) { pathname = ""; }
         if (pathname !== "/bridge") {
@@ -131,8 +148,8 @@ class Bridge {
 
   onHttp(req, res) {
     const remote = req.socket.remoteAddress || "";
-    if (!isLoopback(remote)) {
-      return this.sendJson(res, 403, { ok: false, code: "FORBIDDEN", error: "只接受本机回环地址的请求" });
+    if (!isLoopback(remote) || !isLoopbackHostHeader(req.headers.host)) {
+      return this.sendJson(res, 403, { ok: false, code: "FORBIDDEN", error: "只接受本机回环地址与合法 Host 的请求" });
     }
     let url;
     try { url = new URL(req.url || "/", "http://127.0.0.1"); } catch (e) {
@@ -156,7 +173,7 @@ class Bridge {
     if (req.headers.origin) {
       return this.sendJson(res, 403, { ok: false, code: "FORBIDDEN", error: "不接受带 Origin 的跨域请求" });
     }
-    if (this.token && String(req.headers["x-ag-token"] || "") !== this.token) {
+    if (this.token && !tokenEquals(req.headers["x-ag-token"], this.token)) {
       return this.sendJson(res, 401, { ok: false, code: "UNAUTHORIZED", error: "x-ag-token 不匹配" });
     }
     if (String(req.headers["content-type"] || "").toLowerCase().indexOf("application/json") === -1) {
@@ -187,7 +204,7 @@ class Bridge {
       if (!body || typeof body.tool !== "string" || !body.tool) {
         return this.sendJson(res, 400, { ok: false, code: "BAD_REQUEST", error: "缺少 tool 字段" });
       }
-      if (body.tool === "browser_launch") {
+      if (body.tool === "browser_launch" && typeof this.onToolCall !== "function") {
         return this.sendJson(res, 400, { ok: false, code: "LOCAL_ONLY", error: "browser_launch 由各 MCP 进程本地执行，不经过 Leader 中继" });
       }
       const args = body.args && typeof body.args === "object" ? body.args : {};
@@ -232,7 +249,7 @@ class Bridge {
       try { msg = JSON.parse(String(raw)); } catch (e) { return; }
 
       if (msg.t === "hello") {
-        if (this.token && msg.token !== this.token) {
+        if (this.token && !tokenEquals(msg.token, this.token)) {
           this.log("拒绝一个扩展连接：令牌不匹配");
           try { ws.send(JSON.stringify({ t: "error", message: "访问令牌不匹配，请把扩展弹窗里的令牌改成与服务一致" })); } catch (e) { /* ignore */ }
           try { ws.close(); } catch (e) { /* ignore */ }
@@ -242,6 +259,8 @@ class Bridge {
           ws,
           browser: msg.browser || "unknown",
           version: msg.version || "?",
+          id: String(msg.id || ""),
+          features: Array.isArray(msg.features) ? msg.features.map(String) : [],
           ua: msg.ua || "",
           connectedAt: Date.now(),
         };
@@ -299,8 +318,10 @@ class Bridge {
 
   list() {
     return Array.from(this.clients.values()).map((c) => ({
+      id: c.id || "",
       browser: c.browser,
       version: c.version,
+      features: Array.isArray(c.features) ? c.features.slice() : [],
       connectedAt: c.connectedAt,
     }));
   }
@@ -354,6 +375,18 @@ function isLoopback(addr) {
   if (addr.indexOf("127.") === 0) return true;
   if (addr.indexOf("::ffff:127.") === 0) return true;
   return false;
+}
+
+function isLoopbackHostHeader(hostHeader) {
+  if (!hostHeader) return true;
+  return /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(String(hostHeader).trim());
+}
+
+function tokenEquals(a, b) {
+  const sa = Buffer.from(String(a || ""), "utf8");
+  const sb = Buffer.from(String(b || ""), "utf8");
+  if (sa.length !== sb.length) return false;
+  return crypto.timingSafeEqual(sa, sb);
 }
 
 module.exports = { Bridge, BridgeError, MARKER };

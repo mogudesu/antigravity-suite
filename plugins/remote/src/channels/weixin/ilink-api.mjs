@@ -407,8 +407,10 @@ export function parseInbound(message) {
     texts.push(labels.length ? labels.map((label) => `[表情 ${label}]`).join('') : '[表情包]');
   }
   const text = (texts.join('\n') || voiceText || '').trim();
+  const rawId = [message?.msg_id, message?.message_id, message?.msgid, message?.client_id, message?.seq]
+    .find((v) => v !== undefined && v !== null && String(v) !== '');
   return {
-    messageId: String(message?.msg_id || message?.message_id || message?.client_id || ''),
+    messageId: rawId !== undefined ? String(rawId) : '',
     fromUserId: String(message?.from_user_id || message?.sender || ''),
     contextToken: String(message?.context_token || ''),
     text,

@@ -11,6 +11,7 @@ Thumbs.db
 *.bak
 *.swp
 .sidecar-lock.json
+.sidecar-token
 
 # Snapshots and runtime backups
 snapshots/

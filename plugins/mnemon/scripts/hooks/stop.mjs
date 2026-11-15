@@ -10,7 +10,54 @@
  * agreed", corrections) and each hit is queued as a candidate. Nothing is
  * written to memory here: candidates are adopted or rejected in /mnemon-review.
  */
-import { readStdin, parseEvent, findTurnText, findUserTurnText, sessionId, runHook, openStore } from '../lib/hook.mjs';
+import fs from 'node:fs';
+import { readStdin, parseEvent, pick, findTurnText, findUserTurnText, sessionId, runHook, openStore } from '../lib/hook.mjs';
+
+function extractUserTextsFromTranscript(filePath, { min = 12, max = 4 } = {}) {
+  if (!filePath || typeof filePath !== 'string') return [];
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile() || st.size === 0) return [];
+    const maxBytes = 65536;
+    const start = Math.max(0, st.size - maxBytes);
+    const fd = fs.openSync(filePath, 'r');
+    let raw = '';
+    try {
+      const buf = Buffer.alloc(st.size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      raw = buf.toString('utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
+    const lines = raw.split('\n');
+    if (start > 0 && lines.length) lines.shift(); // drop possibly truncated first line
+    const out = [];
+    for (let i = lines.length - 1; i >= 0 && out.length < max; i -= 1) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const isUser =
+        entry?.type === 'USER_INPUT' ||
+        entry?.source === 'USER_EXPLICIT' ||
+        String(entry?.role || '').toLowerCase() === 'user';
+      if (!isUser) continue;
+      const text = typeof entry.content === 'string'
+        ? entry.content
+        : typeof entry.text === 'string'
+          ? entry.text
+          : '';
+      if (text.trim().length >= min) out.unshift(text.trim());
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 
 const KEEP_PATTERNS = [
   /(记住|以后|今后|从现在起|下次|不要再|别再|总是|一律|一定要|我更喜欢|我偏好|我们约定|约定|默认用|规范是|标准是|人设改成|人设改为|永久记住|置顶)/,
@@ -58,9 +105,11 @@ runHook('stop', async () => {
   const session = sessionId(event);
 
   if (config.enhancements && config.enhancements.autoCapture) {
-    const userText = findUserTurnText(event, { min: 12, max: 4 });
-    const fromUser = userText.length > 0;
-    const text = (fromUser ? userText : findTurnText(event, { min: 24, max: 4 })).join('\n');
+    const transcriptPath = pick(event, ['transcriptPath', 'transcript_path', 'transcript']);
+    const transcriptUserText = extractUserTextsFromTranscript(transcriptPath, { min: 12, max: 4 });
+    const inlineUserText = transcriptUserText.length ? transcriptUserText : findUserTurnText(event, { min: 12, max: 4 });
+    const fromUser = inlineUserText.length > 0;
+    const text = (fromUser ? inlineUserText : findTurnText(event, { min: 24, max: 4 })).join('\n');
     let queued = 0;
     for (const candidate of candidatesFrom(text, fromUser)) {
       const result = engine.addCandidate({ ...candidate, source: 'auto-capture', sessionId: session });

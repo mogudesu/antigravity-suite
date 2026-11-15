@@ -29,13 +29,72 @@
     return s.length > n ? s.slice(0, n) + "…" : s;
   }
 
-  /** Password fields are never readable or writable through the bridge. */
-  function isPasswordField(el) {
-    if (!el || !el.tagName || el.tagName.toLowerCase() !== "input") return false;
+  /** Password and sensitive payment/OTP fields are protected by default. */
+  function sensitiveKind(el) {
+    if (!el || !el.tagName) return false;
+    var tag = el.tagName.toLowerCase();
+    if (tag !== "input" && tag !== "textarea") return false;
     var type = String(el.getAttribute("type") || "").toLowerCase();
-    if (type === "password") return true;
+    if (type === "password") return "password";
     var autocomplete = String(el.getAttribute("autocomplete") || "").toLowerCase();
-    return autocomplete.indexOf("current-password") !== -1 || autocomplete.indexOf("new-password") !== -1;
+    if (autocomplete.indexOf("current-password") !== -1 || autocomplete.indexOf("new-password") !== -1) return "password";
+    if (autocomplete.indexOf("one-time-code") !== -1 || autocomplete.indexOf("cc-number") !== -1 || autocomplete.indexOf("cc-csc") !== -1 || autocomplete.indexOf("cc-exp") !== -1) return "sensitive";
+    var meta = [
+      el.getAttribute("name") || "",
+      el.id || "",
+      el.getAttribute("aria-label") || "",
+      el.getAttribute("placeholder") || ""
+    ].join(" ");
+    if (/(?:password|passwd|pwd|passcode|otp|one.?time.?code|pin.?code|cvv|cvc|card.?num|credit.?card|cc.?num|cc.?csc|银行卡|密码|支付密码|交易密码|验证码|口令)/i.test(meta)) return "sensitive";
+    return false;
+  }
+
+  function isPasswordField(el) {
+    return !!sensitiveKind(el);
+  }
+
+  function allRoots(root, out, seen) {
+    out = out || [];
+    seen = seen || new Set();
+    if (!root || seen.has(root)) return out;
+    seen.add(root);
+    out.push(root);
+    try {
+      var els = root.querySelectorAll ? root.querySelectorAll("*") : [];
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.shadowRoot) allRoots(el.shadowRoot, out, seen);
+        if (el.tagName && el.tagName.toLowerCase() === "iframe") {
+          try {
+            if (el.contentDocument) allRoots(el.contentDocument, out, seen);
+          } catch (e) { /* cross-origin iframe */ }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
+  function queryFirstDeep(sel) {
+    var roots = allRoots(document);
+    for (var i = 0; i < roots.length; i++) {
+      try {
+        var hit = roots[i].querySelector(sel);
+        if (hit) return hit;
+      } catch (e) { /* invalid selector in this context */ }
+    }
+    return null;
+  }
+
+  function queryAllDeep(sel) {
+    var roots = allRoots(document);
+    var res = [];
+    for (var i = 0; i < roots.length; i++) {
+      try {
+        var hits = roots[i].querySelectorAll(sel);
+        for (var j = 0; j < hits.length; j++) res.push(hits[j]);
+      } catch (e) { /* ignore */ }
+    }
+    return res;
   }
 
   function ignoredNode(node) {
@@ -171,17 +230,13 @@
       return null;
     }
     if (o.selector) {
-      try {
-        var direct = document.querySelector(o.selector);
-        if (direct) return direct;
-      } catch (e) { /* continue to fallbacks */ }
+      var direct = queryFirstDeep(o.selector);
+      if (direct) return direct;
     }
     if (Array.isArray(o.fallbacks)) {
       for (var i = 0; i < o.fallbacks.length; i++) {
-        try {
-          var fb = o.fallbacks[i] ? document.querySelector(o.fallbacks[i]) : null;
-          if (fb) return fb;
-        } catch (e) { /* continue */ }
+        var fb = o.fallbacks[i] ? queryFirstDeep(o.fallbacks[i]) : null;
+        if (fb) return fb;
       }
     }
     if (o.text) return findByText(o.text, o.nth || 0);
@@ -191,16 +246,21 @@
   function findByText(needle, nth) {
     needle = String(needle).toLowerCase();
     var pool = [];
-    var all = document.querySelectorAll("a,button,input,select,textarea,summary,[role],h1,h2,h3,h4,li,td,span,div,p");
+    var all = queryAllDeep("a,button,input,select,textarea,summary,[role],h1,h2,h3,h4,li,td,span,div,p");
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
       if (!isVisible(el)) continue;
       var hay = (textOf(el) + " " + (el.getAttribute("aria-label") || "") + " " + (el.getAttribute("placeholder") || "")).toLowerCase();
       if (hay.indexOf(needle) === -1) continue;
-      // 只取最贴近文本的节点：若子元素也命中则跳过父节点
       pool.push(el);
     }
     if (!pool.length) return null;
+    // 只取最贴近文本的节点：若同一根节点下子孙也命中则剔除父容器
+    pool = pool.filter(function (el) {
+      return !pool.some(function (other) {
+        return other !== el && el.contains && el.contains(other);
+      });
+    });
     pool.sort(function (a, b) {
       var ra = (ROLE_BY_TAG[a.tagName.toLowerCase()] || ROLE_BY_INPUT[(a.getAttribute("type") || "").toLowerCase()] || "") ? 0 : 1;
       var rb = (ROLE_BY_TAG[b.tagName.toLowerCase()] || ROLE_BY_INPUT[(b.getAttribute("type") || "").toLowerCase()] || "") ? 0 : 1;
@@ -265,29 +325,44 @@
         lines.push(line);
       }
 
-      function walk(el, depth) {
+      function walk(el, depth, inShadow) {
         if (truncated || depth > maxDepth) return;
         if (!el || el.nodeType !== 1) return;
         if (ignoredNode(el)) return;
         var tag = el.tagName.toLowerCase();
         if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template" ||
-            tag === "meta" || tag === "link" || tag === "head" || tag === "br" || tag === "hr" ||
-            tag === "iframe" && false) return;
+            tag === "meta" || tag === "link" || tag === "head" || tag === "br" || tag === "hr") return;
         if (!isVisible(el)) return;
         var indent = "  ".repeat(Math.min(depth, 10));
+
+        if (tag === "iframe") {
+          var frameTitle = trunc(el.getAttribute("title") || el.getAttribute("name") || el.getAttribute("src") || "iframe", 80);
+          push(indent + '- iframe "' + frameTitle + '"');
+          try {
+            if (el.contentDocument && el.contentDocument.body) {
+              var fKids = el.contentDocument.body.children;
+              for (var fi = 0; fi < fKids.length; fi++) walk(fKids[fi], depth + 1, false);
+            }
+          } catch (e) { /* 跨域 iframe 由 Playwright 轨接管 */ }
+          return;
+        }
+
         var role = roleOf(el);
-        var interactive = !!INTERACTIVE_TAGS[el.tagName] || (role && role !== "label");
+        var interactive = !!INTERACTIVE_TAGS[el.tagName] || !!el.isContentEditable || (role && role !== "label");
 
         if (interactive) {
           var ref = "e" + (state.nextRef++);
           REFS.set(ref, el);
           var name = nameOf(el);
           var line = indent + "- " + (role || "element") + ' "' + name + '" [ref=' + ref + "]";
-          if (tag === "input") {
-            var type = String(el.getAttribute("type") || "text").toLowerCase();
-            var value = isPasswordField(el) ? "[REDACTED]" : trunc(el.value, 60);
-            line += " type=" + type + ' value="' + value + '"';
-            if (isPasswordField(el)) line += " sensitive=password";
+          if (inShadow) line += " [shadow]";
+          if (tag === "input" || tag === "textarea") {
+            var sens = sensitiveKind(el);
+            var type = tag === "input" ? String(el.getAttribute("type") || "text").toLowerCase() : "textarea";
+            var value = sens ? "[REDACTED]" : trunc(el.value, 60);
+            if (tag === "input") line += " type=" + type;
+            line += ' value="' + value + '"';
+            if (sens) line += " sensitive=" + sens;
             if (el.checked) line += " checked";
             if (el.disabled) line += " disabled";
             if (el.required) line += " required";
@@ -295,8 +370,6 @@
             var opts = [];
             for (var i = 0; i < Math.min(el.options.length, 8); i++) opts.push(el.options[i].value);
             line += ' value="' + trunc(el.value, 40) + '" options=[' + opts.join(", ") + (el.options.length > 8 ? ", …" : "") + "]";
-          } else if (tag === "textarea") {
-            line += ' value="' + trunc(el.value, 60) + '"';
           } else if (tag === "a" && el.getAttribute("href")) {
             line += ' href="' + trunc(el.getAttribute("href"), 80) + '"';
           }
@@ -305,18 +378,22 @@
         } else if (/^h[1-6]$/.test(tag)) {
           var ht = trunc(textOf(el), 120);
           if (ht) push(indent + "- heading[h" + tag.slice(1) + "] " + ht);
-        } else if (!compact && !el.children.length) {
+        } else if (!compact && !el.children.length && !el.shadowRoot) {
           var t = trunc(textOf(el), 160);
           if (t) push(indent + "- text: " + t);
         }
 
+        if (el.shadowRoot) {
+          var sKids = el.shadowRoot.children;
+          for (var s = 0; s < sKids.length; s++) walk(sKids[s], depth + 1, true);
+        }
         var kids = el.children;
-        for (var k = 0; k < kids.length; k++) walk(kids[k], depth + 1);
+        for (var k = 0; k < kids.length; k++) walk(kids[k], depth + 1, inShadow);
       }
 
       if (document.body) {
         var rootKids = document.body.children;
-        for (var i = 0; i < rootKids.length; i++) walk(rootKids[i], 0);
+        for (var i = 0; i < rootKids.length; i++) walk(rootKids[i], 0, false);
       }
       ensureObserver();
       state.snapshotId = "s" + Date.now().toString(36);
@@ -554,6 +631,17 @@
         var el = resolve(o);
         if (!el) return { ok: false, error: "未找到目标元素：" + describeTarget(o) };
         try { el.scrollIntoView({ block: o.block || "center" }); } catch (e) { el.scrollIntoView(); }
+        if ((o.deltaX || o.deltaY) && (el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2)) {
+          el.scrollBy(o.deltaX || 0, o.deltaY || 0);
+          cursorOn(el, "scroll");
+          return {
+            ok: true,
+            container: true,
+            scrollTop: Math.round(el.scrollTop),
+            scrollLeft: Math.round(el.scrollLeft),
+            scrollHeight: el.scrollHeight,
+          };
+        }
         cursorOn(el, "scroll");
       } else {
         window.scrollBy(o.deltaX || 0, o.deltaY || 0);

@@ -85,6 +85,7 @@ export function writeBytes(p, buffer) {
         /* ignore */
       }
     }
+    if (exists(tmp)) removeFile(tmp);
   }
 }
 
@@ -260,4 +261,99 @@ export function hasExplicitStore(argv = process.argv.slice(2)) {
     (a) => a === '--data-dir' || a.startsWith('--data-dir=') || a === '--mirror-dir' || a.startsWith('--mirror-dir='),
   );
   return flag || !!process.env.MNEMON_DATA_DIR || !!process.env.MNEMON_MIRROR_DIR;
+}
+
+const ACTIVE_LOCKS = new Map();
+const SLEEP_BUF = new Int32Array(new SharedArrayBuffer(4));
+
+function sleepSync(ms) {
+  Atomics.wait(SLEEP_BUF, 0, 0, Math.max(1, ms));
+}
+
+function isProcessAlive(pid) {
+  const num = Number(pid);
+  if (!Number.isInteger(num) || num <= 0) return false;
+  try {
+    process.kill(num, 0);
+    return true;
+  } catch (error) {
+    return error && error.code === 'EPERM';
+  }
+}
+
+/**
+ * Re-entrant cross-process file lock (<dataDir>/.vault.lock).
+ * Prevents concurrent hooks / MCP calls / CLI commands from overwriting each other.
+ */
+export function withVaultLock(dataDir, fn, { timeoutMs = 5000, staleMs = 15000 } = {}) {
+  const root = path.resolve(dataDir);
+  const depth = ACTIVE_LOCKS.get(root) || 0;
+  if (depth > 0) {
+    ACTIVE_LOCKS.set(root, depth + 1);
+    try {
+      return fn();
+    } finally {
+      ACTIVE_LOCKS.set(root, depth);
+    }
+  }
+
+  ensureDir(root);
+  const lockFile = path.join(root, '.vault.lock');
+  const deadline = Date.now() + timeoutMs;
+  let acquired = false;
+
+  while (!acquired) {
+    let fd = null;
+    try {
+      fd = fs.openSync(lockFile, 'wx');
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }), 'utf8');
+      fs.closeSync(fd);
+      fd = null;
+      acquired = true;
+    } catch (error) {
+      if (fd !== null) {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!error || error.code !== 'EEXIST') throw error;
+
+      let stale = false;
+      try {
+        const meta = JSON.parse(fs.readFileSync(lockFile, 'utf8'));
+        const age = Date.now() - Number(meta.acquiredAt || 0);
+        if (age > staleMs || (meta.pid && !isProcessAlive(meta.pid))) stale = true;
+      } catch {
+        try {
+          const st = fs.statSync(lockFile);
+          if (Date.now() - st.mtimeMs > Math.max(500, Math.min(staleMs, 2000))) stale = true;
+        } catch {
+          /* lock already gone */
+        }
+      }
+      if (stale) {
+        removeFile(lockFile);
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`vault lock timeout after ${timeoutMs}ms (${lockFile})`);
+      }
+      sleepSync(15);
+    }
+  }
+
+  ACTIVE_LOCKS.set(root, 1);
+  try {
+    return fn();
+  } finally {
+    ACTIVE_LOCKS.delete(root);
+    try {
+      const current = readJSON(lockFile, null);
+      if (!current || current.pid === process.pid) removeFile(lockFile);
+    } catch {
+      removeFile(lockFile);
+    }
+  }
 }

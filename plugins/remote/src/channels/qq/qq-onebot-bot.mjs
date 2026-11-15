@@ -63,7 +63,7 @@ export function parseOneBotEvent(event, { selfId = '', groupAtRequired = true } 
 }
 
 export class OneBotChannel {
-  constructor({ bot, secrets, hub, logger = console, fetchImpl = fetch }) {
+  constructor({ bot, secrets, hub, logger = console, fetchImpl = fetch, seenIds = [], onSeen = null }) {
     this.bot = bot;
     this.secrets = secrets;
     this.hub = hub;
@@ -72,7 +72,7 @@ export class OneBotChannel {
     this.server = null;
     this.socket = null;
     this.pending = new Map();
-    this.dedupe = new Dedupe();
+    this.dedupe = new Dedupe({ limit: 500, initial: seenIds, onChange: onSeen });
     this.status = 'offline';
     this.lastError = '';
   }

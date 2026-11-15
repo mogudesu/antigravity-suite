@@ -6,41 +6,57 @@
   <title>antigravity浏览器控制 · 谷谷嘎嘎</title>
 </head>
 <body>
+  <div class="starfield" aria-hidden="true"></div>
+
   <header>
-    <span id="dot" class="dot"></span>
-    <strong>antigravity浏览器控制</strong>
+    <span class="spark">✦</span>
+    <div class="titlebox">
+      <span class="kicker">STARLIGHT CONTROL</span>
+      <strong>antigravity 浏览器控制</strong>
+    </div>
     <span class="brand">谷谷嘎嘎</span>
-    <span id="browser" class="muted"></span>
   </header>
 
-  <div id="state" class="state">正在读取状态…</div>
-
-  <label>桥接端口 <input id="port" type="number" min="1024" max="65535" /></label>
-  <label>访问令牌（可留空） <input id="token" type="text" placeholder="与 MCP 服务保持一致" /></label>
-  <label>搜索地址 <input id="search" type="text" /></label>
-  <label class="row"><input id="auto" type="checkbox" /> 自动连接并保持重连</label>
-
-  <div class="actions">
-    <button id="save">保存</button>
-    <button id="reconnect">重连</button>
+  <div class="statusline">
+    <span id="dot" class="dot"></span>
+    <span id="state" class="state">正在读取状态…</span>
+    <span id="browser" class="muted"></span>
   </div>
 
-  <div class="rec-panel">
-    <div class="rec-header">
-      <strong>🎬 RPA 录制与回放</strong>
+  <section class="card">
+    <div class="card-head">
+      <span class="card-title">连接</span>
+      <span id="detail" class="muted small"></span>
+    </div>
+    <label>桥接端口 <input id="port" type="number" min="1024" max="65535" /></label>
+    <label>访问令牌（可留空） <input id="token" type="text" placeholder="与 MCP 服务保持一致" /></label>
+    <label>搜索地址 <input id="search" type="text" /></label>
+    <label class="row"><input id="auto" type="checkbox" /> 自动连接并保持重连</label>
+    <div class="actions">
+      <button id="save" class="primary">保存</button>
+      <button id="reconnect" class="ghost">重连</button>
+    </div>
+  </section>
+
+  <section class="card rec-panel">
+    <div class="card-head">
+      <span class="card-title">🎬 RPA 录制与回放</span>
       <span id="rec-state" class="rec-badge">未录制</span>
     </div>
     <div id="rec-detail" class="muted small">点击下方按钮可在当前页面开启 RPA 动作录制</div>
     <div class="actions rec-actions">
-      <button id="rec-start" class="btn-rec">🔴 开始录制当前页</button>
-      <button id="rec-stop" class="btn-stop" disabled>⏹ 完成录制</button>
+      <button id="rec-start" class="primary rec">🔴 开始录制当前页</button>
+      <button id="rec-stop" class="stop" disabled>⏹ 完成录制</button>
     </div>
-  </div>
-
-  <div id="detail" class="muted small"></div>
+    <div id="rec-error" class="rec-error hidden"></div>
+  </section>
 
   <footer class="muted small">
-    扩展把当前浏览器标签页暴露给本地 MCP 服务，服务由 Antigravity 启动。控制开始时会附加调试通道，由浏览器显示标准调试提示条，提示条首段为扩展名「谷谷嘎嘎正在控制你的浏览器」，并在页面内显示可见鼠标。提示条是浏览器原生控件，扩展无法改写其模板文案。
+    <span>扩展把当前标签页暴露给本地 MCP 服务；控制开始后由浏览器显示原生调试提示条，页面内显示可见鼠标。</span>
+    <span class="footer-row">
+      更新插件文件后请重载扩展
+      <button id="reload-ext" class="linkbtn">⟳ 重载扩展</button>
+    </span>
   </footer>
   <script src="popup.js"></script>
 </body>

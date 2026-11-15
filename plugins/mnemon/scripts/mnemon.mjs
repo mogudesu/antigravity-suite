@@ -31,6 +31,44 @@ for (let i = 1; i < argv.length; i += 1) {
 const engine = openEngine({ dataDir: store.resolveDataDir(argv), mirrorDir: store.resolveMirrorDir(argv), workspaceDir: process.cwd(), register: !store.hasExplicitStore(argv) });
 const print = (value) => process.stdout.write(`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`);
 
+const TRANSPORT_FLAGS = new Set(['data-dir', 'mirror-dir', 'workspace']);
+const NUMERIC_CONFIG_KEYS = new Set([
+  'residentBudgetChars', 'searchBudget', 'documentBudget', 'candidateBudget',
+  'keepRevisions', 'autoMergeThreshold', 'duplicateThreshold',
+  'conflictContainment', 'staleAfterDays', 'pinnedBoost', 'snapshotRetention',
+]);
+const BOOLEAN_CONFIG_KEYS = new Set(['redactSecrets', 'autoCapture', 'lightContext', 'scopedSources']);
+const ENHANCEMENT_KEYS = new Set(['autoCapture', 'lightContext', 'scopedSources']);
+
+function parseConfigPatch(rawFlags) {
+  const patch = {};
+  for (const [rawKey, rawVal] of Object.entries(rawFlags || {})) {
+    if (TRANSPORT_FLAGS.has(rawKey)) continue;
+    const coerce = (k, v) => {
+      if (v === 'true') return true;
+      if (v === 'false') return false;
+      if (BOOLEAN_CONFIG_KEYS.has(k) && typeof v === 'boolean') return v;
+      if (NUMERIC_CONFIG_KEYS.has(k)) {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+      if (k === 'spaces' && typeof v === 'string') {
+        return v.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      return v;
+    };
+    if (rawKey.startsWith('enhancements.')) {
+      const sub = rawKey.slice('enhancements.'.length);
+      patch.enhancements = { ...(patch.enhancements || {}), [sub]: coerce(sub, rawVal) };
+    } else if (ENHANCEMENT_KEYS.has(rawKey)) {
+      patch.enhancements = { ...(patch.enhancements || {}), [rawKey]: coerce(rawKey, rawVal) };
+    } else {
+      patch[rawKey] = coerce(rawKey, rawVal);
+    }
+  }
+  return patch;
+}
+
 const commands = {
   status: () => engine.status(),
   search: () => ({ query: positional.join(' '), hits: engine.searchMemories(positional.join(' '), { space: flags.space || null, limit: Number(flags.limit) || 8 }) }),
@@ -51,7 +89,10 @@ const commands = {
   audit: () => engine.audit(),
   entities: () => ({ entities: engine.entities() }),
   context: () => engine.formatContextBlock(engine.buildTurnContext({ prompt: positional.join(' ') })),
-  config: () => (Object.keys(flags).length ? { config: engine.setConfig(flags) } : engine.config()),
+  config: () => {
+    const patch = parseConfigPatch(flags);
+    return Object.keys(patch).length ? { config: engine.setConfig(patch) } : engine.config();
+  },
   paths: () => ({ dataDir: engine.dataDir, mirrorDir: engine.mirrorDir, files: engine.p }),
   runtime: () => engine.readRuntime(flags.kind || 'both'),
   'runtime-write': () => engine.writeRuntime({ kind: flags.kind || 'memory', content: store.readText(flags.file || positional[0] || ''), mode: flags.mode || 'replace' }),

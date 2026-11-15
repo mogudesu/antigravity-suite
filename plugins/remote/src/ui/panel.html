@@ -7,95 +7,701 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0d0f14; --panel: #161a22; --panel2: #1c212b; --line: #262c37;
-    --text: #e8eaf0; --muted: #8b94a5; --gold: #d9b26a; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
-    --radius: 12px;
+    --bg: #10131c;
+    --surface: rgba(24, 29, 43, 0.82);
+    --surface-solid: #181d2b;
+    --surface-2: rgba(33, 39, 57, 0.72);
+    --surface-hover: rgba(42, 50, 72, 0.85);
+    --line: rgba(255, 255, 255, 0.08);
+    --line-soft: rgba(255, 255, 255, 0.045);
+    --line-focus: rgba(230, 200, 138, 0.45);
+    --text: #edf0f7;
+    --text-sub: #b6bfd3;
+    --muted: #8490a8;
+    --gold: #e6c88a;
+    --gold-soft: rgba(230, 200, 138, 0.14);
+    --lavender: #a5b4fc;
+    --lavender-soft: rgba(165, 180, 252, 0.13);
+    --ok: #7dd3a8;
+    --ok-soft: rgba(125, 211, 168, 0.13);
+    --warn: #f3c979;
+    --warn-soft: rgba(243, 201, 121, 0.14);
+    --bad: #f29b9b;
+    --bad-soft: rgba(242, 155, 155, 0.13);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --shadow: 0 10px 30px rgba(4, 6, 14, 0.28);
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 16px 18px 32px; background: var(--bg); color: var(--text);
-    font: 13px/1.6 ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
-  }
-  h1 { font-size: 15px; margin: 0; letter-spacing: .3px; }
-  .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-  .update-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 12px;
-    border: 1px solid #5a4620; border-radius: 10px; background: linear-gradient(180deg, #3a2f16, #2a2210);
-    color: #f0d9a3; font-size: 12px; }
-  .update-bar[hidden] { display: none !important; }
-  .update-bar b { color: #ffe8b8; }
-  .update-bar a { color: #ffd98a; text-decoration: underline; }
-  .update-bar .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-  .update-bar button { padding: 3px 10px; font-size: 11px; background: rgba(255,255,255,.06); border-color: #5a4620; }
 
-  .pills { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
-  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--line);
-    border-radius: 999px; background: var(--panel); color: var(--muted); font-size: 12px; }
-  .pill b { color: var(--text); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
-  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
-  .tab { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent;
-    color: var(--muted); cursor: pointer; font: inherit; }
-  .tab[data-active="true"] { background: linear-gradient(180deg, #2a2318, #1d1a14); color: var(--gold); border-color: #4a3c1e; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
-  .card header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-  .card h3 { font-size: 13px; margin: 0; flex: 1; }
-  .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .tag.ok { color: var(--ok); border-color: #24512f; } .tag.warn { color: var(--warn); border-color: #4a3c16; }
-  .tag.bad { color: var(--bad); border-color: #4a2624; }
-  .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
-  .field label { color: var(--muted); font-size: 11px; }
-  input, select, textarea { width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--panel2); color: var(--text); font: inherit; font-size: 12px; }
-  .row { display: flex; gap: 8px; }
-  .row > * { flex: 1; }
-  button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2);
-    color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
-  button:hover { border-color: #3b4453; }
-  button.primary { background: linear-gradient(180deg, #3a2f16, #2a2210); border-color: #5a4620; color: #f0d9a3; }
-  button.danger { color: #ffb4ae; border-color: #4a2624; }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  * { box-sizing: border-box; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+
+  html, body { min-height: 100%; }
+
+  body {
+    margin: 0;
+    padding: 18px 20px 36px;
+    background:
+      radial-gradient(90% 55% at 6% 0%, rgba(230, 200, 138, 0.065) 0%, transparent 58%),
+      radial-gradient(80% 55% at 94% 4%, rgba(165, 180, 252, 0.075) 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 13px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  /* 顶部更新提示条 */
+  .update-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 14px;
+    padding: 10px 14px;
+    border: 1px solid rgba(230, 200, 138, 0.28);
+    border-radius: 13px;
+    background: linear-gradient(135deg, rgba(230, 200, 138, 0.12), rgba(165, 180, 252, 0.08));
+    backdrop-filter: blur(12px);
+    color: #f4e2bc;
+    font-size: 12px;
+  }
+  .update-bar[hidden] { display: none !important; }
+  .update-bar b { color: #fff0cf; font-weight: 600; }
+  .update-bar a { color: var(--gold); text-decoration: none; border-bottom: 1px dashed rgba(230, 200, 138, 0.45); }
+  .update-bar .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .update-bar button { padding: 4px 11px; font-size: 11.5px; border-radius: 8px; }
+
+  /* 顶栏 */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    border: 1px solid rgba(230, 200, 138, 0.24);
+    background: linear-gradient(145deg, rgba(230, 200, 138, 0.14), rgba(165, 180, 252, 0.12));
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    flex: 0 0 36px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 14px rgba(0, 0, 0, 0.2);
+  }
+  .brand-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .brand-mark .fallback { font-size: 16px; color: var(--gold); display: none; }
+
+  .brand-copy h1 {
+    font-size: 15px;
+    font-weight: 650;
+    margin: 0;
+    letter-spacing: 0.2px;
+    color: #f4f6fb;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .brand-ver {
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--muted);
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--line-soft);
+  }
+  .brand-sub {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 1px;
+  }
+
+  .pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    backdrop-filter: blur(10px);
+    color: var(--muted);
+    font-size: 12px;
+    transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
+  }
+  .pill b { color: var(--text); font-weight: 600; }
+  .pill-btn {
+    cursor: pointer;
+    color: var(--text-sub);
+    padding: 5px 12px;
+  }
+  .pill-btn:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex: 0 0 7px;
+  }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(125, 211, 168, 0.55); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 8px rgba(243, 201, 121, 0.45); }
+  .dot.bad { background: var(--bad); box-shadow: 0 0 8px rgba(242, 155, 155, 0.45); }
+
+  /* 实时模型绑定条 */
+  .model-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: linear-gradient(135deg, rgba(26, 31, 46, 0.88), rgba(22, 27, 40, 0.78));
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shadow);
+  }
+  .model-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--ok-soft);
+    color: var(--ok);
+    border: 1px solid rgba(125, 211, 168, 0.24);
+    white-space: nowrap;
+  }
+  .live-badge.offline {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: rgba(243, 201, 121, 0.24);
+  }
+  .live-badge.err {
+    background: var(--bad-soft);
+    color: var(--bad);
+    border-color: rgba(242, 155, 155, 0.24);
+  }
+  .live-pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: softPulse 2.4s ease-in-out infinite;
+  }
+  @keyframes softPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.85); }
+  }
+
+  .model-bar-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 220px;
+  }
+  .model-bar-controls select {
+    max-width: 360px;
+    background: rgba(16, 20, 31, 0.72);
+  }
+  .quota-pill {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--lavender-soft);
+    color: var(--lavender);
+    border: 1px solid rgba(165, 180, 252, 0.2);
+    white-space: nowrap;
+  }
+  .model-bar-meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
+  /* 平台标签导航 */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 0 0 14px;
+  }
+  .tab {
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12.5px;
+    transition: all 0.18s var(--ease);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tab:hover {
+    color: var(--text);
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .tab[data-active="true"] {
+    background: linear-gradient(135deg, rgba(230, 200, 138, 0.18), rgba(165, 180, 252, 0.1));
+    color: var(--gold);
+    border-color: rgba(230, 200, 138, 0.36);
+    font-weight: 500;
+  }
+  .tab.add-btn {
+    margin-left: auto;
+    background: var(--gold-soft);
+    color: var(--gold);
+    border-color: rgba(230, 200, 138, 0.3);
+    font-weight: 500;
+  }
+  .tab.add-btn:hover {
+    background: rgba(230, 200, 138, 0.22);
+    border-color: rgba(230, 200, 138, 0.5);
+  }
+
+  /* 卡片与栅格 */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 14px;
+  }
+
+  .card {
+    background: var(--surface);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
+  }
+  .card:hover {
+    border-color: rgba(255, 255, 255, 0.13);
+  }
+  .card header {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 13px;
+    padding-bottom: 11px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    flex: 1;
+    color: #f3f5fb;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plat-badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-sub);
+  }
+  .plat-badge.weixin { background: rgba(125, 211, 168, 0.12); color: #8be0b5; border-color: rgba(125, 211, 168, 0.24); }
+  .plat-badge.qq { background: rgba(125, 211, 252, 0.12); color: #93d5fa; border-color: rgba(125, 211, 252, 0.24); }
+  .plat-badge.feishu { background: rgba(165, 180, 252, 0.13); color: #b7c3fd; border-color: rgba(165, 180, 252, 0.24); }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .tag.ok { color: var(--ok); background: var(--ok-soft); border-color: rgba(125, 211, 168, 0.26); }
+  .tag.warn { color: var(--warn); background: var(--warn-soft); border-color: rgba(243, 201, 121, 0.26); }
+  .tag.bad { color: var(--bad); background: var(--bad-soft); border-color: rgba(242, 155, 155, 0.26); }
+
+  /* 表单控件 */
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-bottom: 10px;
+    min-width: 0;
+  }
+  .field label {
+    color: var(--muted);
+    font-size: 11.5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .field-hint {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  .subgrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .row > * { flex: 1; min-width: 140px; }
+
+  input, select, textarea {
+    width: 100%;
+    padding: 8px 11px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    outline: none;
+    transition: border-color 0.16s var(--ease), background 0.16s var(--ease), box-shadow 0.16s var(--ease);
+  }
+  input:hover, select:hover, textarea:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--line-focus);
+    background: rgba(36, 43, 62, 0.92);
+    box-shadow: 0 0 0 3px rgba(230, 200, 138, 0.1);
+  }
+  select option, select optgroup {
+    background: #1a2030;
+    color: var(--text);
+  }
+  input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--gold);
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+
+  button {
+    padding: 7px 13px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--text-sub);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.16s var(--ease);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  button:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+  button:active:not(:disabled) { transform: translateY(0.5px); }
+  button.primary {
+    background: linear-gradient(135deg, rgba(230, 200, 138, 0.22), rgba(230, 200, 138, 0.12));
+    border-color: rgba(230, 200, 138, 0.4);
+    color: #f6e1b2;
+  }
+  button.primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(230, 200, 138, 0.3), rgba(230, 200, 138, 0.18));
+    border-color: rgba(230, 200, 138, 0.58);
+    color: #fff2d4;
+  }
+  button.danger {
+    color: var(--bad);
+    border-color: rgba(242, 155, 155, 0.22);
+    background: rgba(242, 155, 155, 0.06);
+  }
+  button.danger:hover:not(:disabled) {
+    background: rgba(242, 155, 155, 0.14);
+    border-color: rgba(242, 155, 155, 0.42);
+  }
+  button.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--muted);
+    padding: 5px 9px;
+  }
+  button.ghost:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--line-soft);
+    color: var(--text);
+  }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px solid var(--line-soft);
+  }
+  .actions .spacer { margin-left: auto; }
+
+  .error-banner {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    background: var(--bad-soft);
+    border: 1px solid rgba(242, 155, 155, 0.24);
+    color: #f8bcbc;
+    font-size: 11.5px;
+    word-break: break-word;
+  }
+
   .muted { color: var(--muted); font-size: 12px; }
-  .empty { color: var(--muted); padding: 20px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .empty {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    padding: 34px 20px;
+    text-align: center;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  /* 主动漫游折叠区 */
+  .roam-card {
+    margin-bottom: 14px;
+  }
+  .roam-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex-wrap: wrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  .roam-head h3 {
+    font-size: 13.5px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text);
+  }
+  .roam-head .roam-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .roam-body {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line-soft);
+  }
+  .roam-body[hidden] { display: none; }
+
+  /* 弹窗 */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 8, 15, 0.65);
+    backdrop-filter: blur(6px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 16px;
+  }
   .modal[data-open="true"] { display: flex; }
-  .sheet { width: min(520px, 92vw); max-height: 86vh; overflow: auto; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
-  .qr { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px; }
-  .qr img { width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 10px; }
-  .toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 10px 14px; border-radius: 10px;
-    border: 1px solid var(--line); background: var(--panel2); opacity: 0; transition: .18s ease; pointer-events: none; }
-  .toast.show { opacity: 1; }
-  .toast.err { border-color: #4a2624; color: #ffb4ae; }
-  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  .sheet {
+    width: min(520px, 100%);
+    max-height: 86vh;
+    overflow: auto;
+    background: #171c2a;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 18px;
+    padding: 20px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  }
+  .sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .sheet h2 { margin: 0; font-size: 15.5px; font-weight: 650; }
+  .qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 10px 6px;
+  }
+  .qr img {
+    width: 204px;
+    height: 204px;
+    background: #fff;
+    padding: 10px;
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  }
+
+  .toast {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    max-width: min(420px, calc(100vw - 36px));
+    padding: 10px 15px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(28, 34, 50, 0.94);
+    backdrop-filter: blur(12px);
+    color: var(--text);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.38);
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+    pointer-events: none;
+    z-index: 80;
+    font-size: 12.5px;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.err { border-color: rgba(242, 155, 155, 0.36); color: #fbd0d0; }
+
+  code {
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-sub);
+  }
+
+  @media (max-width: 540px) {
+    body { padding: 12px 12px 28px; }
+    .grid { grid-template-columns: 1fr; }
+    .subgrid { grid-template-columns: 1fr; }
+    .tab.add-btn { margin-left: 0; }
+    .model-bar-meta { margin-left: 0; }
+  }
 </style>
 </head>
 <body>
-<div id="updateBar" class="update-bar" hidden>
-  <span>有新版本 <b id="updateVersion"></b> 可用（当前 v<span id="updateCurrent"></span>）</span>
-  <span class="sp">
-    <button class="primary" id="updateApply">立即更新</button>
-    <button id="updateCopy">复制下载地址</button>
-    <a id="updateLink" href="#" target="_blank" rel="noreferrer">前往下载</a>
-    <button id="updateDismiss" aria-label="本次不再提示">×</button>
-  </span>
-</div>
-<div class="top">
-  <h1>antigravity远程-mogu</h1>
-  <div class="pills">
-    <span class="pill"><span id="wbDot" class="dot"></span>桥接 <b id="wbText">—</b></span>
-    <span class="pill">运行中 <b id="runText">0</b></span>
-    <span class="pill">待补发 <b id="deferText">0</b></span>
-    <span class="pill"><button id="diag" style="padding:2px 8px">诊断</button></span>
-    <span class="pill"><button id="refresh" style="padding:2px 8px">刷新</button></span>
+<div class="app">
+  <div id="updateBar" class="update-bar" hidden>
+    <span>发现新版本 <b id="updateVersion"></b>（当前 v<span id="updateCurrent"></span>）</span>
+    <span class="sp">
+      <button class="primary" id="updateApply">立即更新</button>
+      <button id="updateCopy">复制地址</button>
+      <a id="updateLink" href="#" target="_blank" rel="noreferrer">前往下载</a>
+      <button id="updateDismiss" class="ghost" aria-label="本次不再提示">×</button>
+    </span>
   </div>
-</div>
 
-<div class="tabs" id="tabs"></div>
-<div id="roamBox"></div>
-<div class="grid" id="bots"></div>
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <img src="/assets/logo.png" alt="logo" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <span class="fallback">✦</span>
+      </div>
+      <div class="brand-copy">
+        <h1>antigravity远程-mogu <span class="brand-ver" id="appVer"></span></h1>
+        <div class="brand-sub">微信 · QQ · 飞书 桌面会话远程桥接</div>
+      </div>
+    </div>
+
+    <div class="pills">
+      <span class="pill" id="wbPill"><span id="wbDot" class="dot"></span>桥接 <b id="wbText">—</b></span>
+      <span class="pill">运行 <b id="runText">0</b></span>
+      <span class="pill">待补发 <b id="deferText">0</b></span>
+      <button class="pill pill-btn" id="diag">诊断</button>
+      <button class="pill pill-btn" id="refresh">刷新</button>
+    </div>
+  </div>
+
+  <div class="model-bar" id="modelBar">
+    <div class="model-bar-left">
+      <span class="live-badge offline" id="modelLiveBadge"><span class="live-pulse"></span><span id="modelLiveState">连接中</span></span>
+      <span class="muted" style="white-space:nowrap">Antigravity 当前模型</span>
+    </div>
+    <div class="model-bar-controls">
+      <select id="liveModelSelect" title="直接切换 Antigravity 当前激活模型"></select>
+      <span class="quota-pill" id="liveModelQuota" hidden>—</span>
+    </div>
+    <div class="model-bar-meta">
+      <span id="modelSyncMeta">等待同步…</span>
+      <button id="syncModelsBtn" class="ghost" title="立即同步 Antigravity 模型列表">↻ 同步</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs"></div>
+  <div id="roamBox"></div>
+  <div class="grid" id="bots"></div>
+  <datalist id="workspaceList"></datalist>
+</div>
 
 <div class="modal" id="modal">
   <div class="sheet" id="sheet"></div>
@@ -104,20 +710,35 @@
 
 <script>
 const API = location.origin;
-// 宿主（设置页注入的 iframe）用 ping/pong 确认面板真的启动起来了：
-// 父页与面板跨源，读不到 contentDocument，只有消息往返能区分「加载成功」和「连不上」。
+// 宿主（设置页注入的 iframe）用 ping/pong 确认面板已启动
 window.addEventListener('message', (event) => {
   if (event.data && event.data.agb === 'ping') {
-    try { event.source.postMessage({ agb: 'pong', origin: API }, '*'); } catch (e) { /* ignore */ }
+    try { event.source.postMessage({ agb: 'pong', origin: API }, '*'); } catch {}
   }
 });
+
 let health = null;
 let bots = [];
 let bindings = [];
+let workspaces = [];
 let activePlatform = 'all';
 let roam = null;
-// 模型列表来自 /api/models（Antigravity 的模型菜单），只在启动/手动刷新时读，避免频繁开菜单
-const models = { loading: false, loaded: false, current: '', items: [], error: '' };
+let roamExpanded = null; // null = 根据 enabled 自动决定；boolean = 用户手动切换
+
+// 实时模型状态：由 /api/models + SSE `models` 事件持续同步
+const models = {
+  loading: false,
+  loaded: false,
+  ok: false,
+  current: '',
+  currentRaw: '',
+  items: [],
+  list: [], // [{ label, base, effort, quota, tag, modelId }]
+  source: '',
+  updatedAt: 0,
+  error: '',
+};
+
 const PLATFORM = {
   weixin: { label: '微信', hint: '扫码绑定，免 PC 微信' },
   qq: { label: 'QQ', hint: '官方机器人凭据，或 OneBot 反连' },
@@ -143,49 +764,209 @@ function toast(message, isError) {
   el.textContent = message;
   el.className = 'toast show' + (isError ? ' err' : '');
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.className = 'toast'; }, 3000);
+  toast._t = setTimeout(() => { el.className = 'toast'; }, 3200);
 }
 
 function statusTag(status) {
-  const map = { online: ['ok', '在线'], listening: ['warn', '等待反连'], connecting: ['warn', '连接中'],
-    reconnecting: ['warn', '重连中'], 'need-scan': ['bad', '需扫码'], 'need-credentials': ['bad', '待填凭据'],
-    error: ['bad', '异常'], disconnected: ['bad', '已断开'], offline: ['bad', '已停止'], stopped: ['bad', '已停止'] };
+  const map = {
+    online: ['ok', '在线'],
+    listening: ['warn', '等待反连'],
+    connecting: ['warn', '连接中'],
+    reconnecting: ['warn', '重连中'],
+    'need-scan': ['bad', '需扫码'],
+    'need-credentials': ['bad', '待填凭据'],
+    error: ['bad', '异常'],
+    disconnected: ['bad', '已断开'],
+    offline: ['bad', '已停止'],
+    stopped: ['bad', '已停止'],
+  };
   const [kind, text] = map[status] || ['', status || '未知'];
   return `<span class="tag ${kind}">${esc(text)}</span>`;
 }
 
-async function loadModels({ force = false } = {}) {
+function formatQuota(q) {
+  if (typeof q !== 'number' || !Number.isFinite(q)) return '';
+  return `${Math.round(q * 100)}%`;
+}
+
+function applyModelsPayload(data) {
+  models.ok = Boolean(data?.ok);
+  models.items = Array.isArray(data?.items) ? data.items : [];
+  models.list = Array.isArray(data?.models) && data.models.length
+    ? data.models
+    : models.items.map((label) => ({ label, base: label, effort: '', quota: null, tag: '' }));
+  models.current = data?.current || '';
+  models.currentRaw = data?.currentRaw || models.current;
+  models.source = data?.source || '';
+  models.updatedAt = data?.updatedAt || Date.now();
+  models.error = data?.ok ? '' : (data?.error || '未连接到 Antigravity');
+  models.loaded = Boolean(data?.ok);
+  renderModelBar();
+  syncLiveModelHintsInCards();
+}
+
+async function loadModels({ force = false, silent = false } = {}) {
   if (models.loading) return;
   if (models.loaded && !force) return;
   models.loading = true;
-  models.error = '';
-  renderBots();
+  if (!silent) renderModelBar();
   try {
-    const data = await api('/api/models' + (force ? '?force=1' : ''));
-    models.items = data.items || [];
-    models.current = data.current || '';
-    models.error = data.ok ? '' : data.error || '读取失败';
-    models.loaded = Boolean(data.ok);
+    const res = await fetch(API + '/api/models' + (force ? '?force=1' : ''));
+    const data = await res.json().catch(() => ({ ok: false, error: 'HTTP ' + res.status }));
+    applyModelsPayload(data);
   } catch (error) {
+    models.ok = false;
     models.error = error.message;
+    renderModelBar();
   } finally {
     models.loading = false;
+    renderModelBar();
     renderBots();
   }
 }
 
-/** 模型下拉：第一项是"跟随界面"，避免用户手打错名字。 */
-function modelOptions(bot) {
-  const current = bot.defaultModel || '';
-  const items = models.items.slice();
-  if (current && !items.includes(current)) items.push(current);
-  const options = [`<option value="" ${current ? '' : 'selected'}>跟随界面当前模型${models.current ? `（${esc(models.current)}）` : ''}</option>`];
-  for (const item of items) {
-    const stale = current === item && !models.items.includes(item);
-    options.push(`<option value="${esc(item)}" ${current === item ? 'selected' : ''}>${esc(item)}${stale ? '（当前不可用）' : ''}</option>`);
+function buildGroupedModelOptions(selectedValue, { includeFollow = true } = {}) {
+  const current = selectedValue || '';
+  const list = models.list.length ? models.list : models.items.map((label) => ({ label, base: label, quota: null }));
+  const parts = [];
+
+  if (includeFollow) {
+    const followLabel = `跟随 Antigravity 实时模型${models.current ? `（当前：${models.current}）` : ''}`;
+    parts.push(`<option value="" data-follow="1" ${current ? '' : 'selected'}>${esc(followLabel)}</option>`);
+  } else if (!list.length) {
+    parts.push(`<option value="">${models.loading ? '正在同步 Antigravity 模型…' : (models.error || '暂无可用模型')}</option>`);
   }
-  return options.join('');
+
+  const groups = new Map();
+  for (const item of list) {
+    const groupName = item.base || item.label;
+    if (!groups.has(groupName)) groups.set(groupName, []);
+    groups.get(groupName).push(item);
+  }
+
+  const known = new Set(list.map((m) => m.label));
+  for (const [groupName, groupItems] of groups.entries()) {
+    if (groupItems.length === 1) {
+      const m = groupItems[0];
+      const q = formatQuota(m.quota);
+      const text = q ? `${m.label} · 余量 ${q}` : m.label;
+      parts.push(`<option value="${esc(m.label)}" ${current === m.label ? 'selected' : ''}>${esc(text)}</option>`);
+    } else {
+      const inner = groupItems.map((m) => {
+        const q = formatQuota(m.quota);
+        const text = q ? `${m.label} · 余量 ${q}` : m.label;
+        return `<option value="${esc(m.label)}" ${current === m.label ? 'selected' : ''}>${esc(text)}</option>`;
+      }).join('');
+      parts.push(`<optgroup label="${esc(groupName)}">${inner}</optgroup>`);
+    }
+  }
+
+  if (current && !known.has(current)) {
+    parts.push(`<option value="${esc(current)}" selected>${esc(current)}（当前不可用）</option>`);
+  }
+  return parts.join('');
 }
+
+function renderModelBar() {
+  const badge = document.getElementById('modelLiveBadge');
+  const stateEl = document.getElementById('modelLiveState');
+  const select = document.getElementById('liveModelSelect');
+  const quotaEl = document.getElementById('liveModelQuota');
+  const metaEl = document.getElementById('modelSyncMeta');
+  if (!badge || !select) return;
+
+  if (models.ok && models.items.length) {
+    badge.className = 'live-badge';
+    stateEl.textContent = '实时绑定';
+  } else if (models.loading) {
+    badge.className = 'live-badge offline';
+    stateEl.textContent = '同步中';
+  } else {
+    badge.className = 'live-badge err';
+    stateEl.textContent = '未连接';
+  }
+
+  if (document.activeElement !== select) {
+    select.innerHTML = buildGroupedModelOptions(models.current, { includeFollow: false });
+    select.disabled = !models.ok || !models.items.length;
+  }
+
+  const activeMeta = models.list.find((m) => m.label === models.current);
+  const q = formatQuota(activeMeta?.quota);
+  if (q) {
+    quotaEl.textContent = `余量 ${q}`;
+    quotaEl.hidden = false;
+  } else {
+    quotaEl.hidden = true;
+  }
+
+  if (models.ok) {
+    const timeStr = models.updatedAt
+      ? new Date(models.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : '';
+    metaEl.textContent = `${models.items.length} 个可用${timeStr ? ` · ${timeStr}` : ''}`;
+  } else {
+    metaEl.textContent = models.error || '等待 Antigravity 就绪';
+  }
+}
+
+/** 不重建 DOM 的情况下实时更新各机器人卡片里的「跟随实时模型」提示文字。 */
+function syncLiveModelHintsInCards() {
+  document.querySelectorAll('#bots .card').forEach((card) => {
+    const sel = card.querySelector('select[data-field="defaultModel"]');
+    const followOpt = sel?.querySelector('option[data-follow="1"]');
+    if (followOpt) {
+      followOpt.textContent = `跟随 Antigravity 实时模型${models.current ? `（当前：${models.current}）` : ''}`;
+    }
+    const hint = card.querySelector('.ag-model-live-hint');
+    if (hint) {
+      hint.textContent = models.loading
+        ? '正在读取 Antigravity 模型列表…'
+        : models.error
+          ? `未同步：${models.error}`
+          : `桌面当前激活：${models.current || '—'}`;
+    }
+  });
+}
+
+document.getElementById('liveModelSelect').addEventListener('change', async (event) => {
+  const target = event.target.value;
+  if (!target) return;
+  const select = event.target;
+  select.disabled = true;
+  toast(`正在切换 Antigravity 模型到「${target}」…`);
+  try {
+    const res = await api('/api/models/select', { method: 'POST', body: { model: target } });
+    if (res.snapshot) applyModelsPayload(res.snapshot);
+    toast(`已切换 Antigravity 模型：${res.current || target}`);
+  } catch (error) {
+    toast('切换失败：' + error.message, true);
+    renderModelBar();
+  } finally {
+    select.disabled = false;
+  }
+});
+
+document.getElementById('syncModelsBtn').addEventListener('click', async () => {
+  await loadModels({ force: true });
+  if (models.ok) toast(`模型列表已同步（${models.items.length} 个可用）`);
+  else toast('同步失败：' + (models.error || '未知'), true);
+});
+
+// ---------------------------------------------------------------- 工作区自动补全
+
+async function loadWorkspaces() {
+  try {
+    const data = await api('/api/workspaces');
+    workspaces = data.items || [];
+    const dl = document.getElementById('workspaceList');
+    if (dl) {
+      dl.innerHTML = workspaces.map((w) => `<option value="${esc(w.path)}">${esc(w.path)}（${w.count} 个会话）</option>`).join('');
+    }
+  } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------- 主动漫游
 
 let roamDirty = false;
 let lastRoamSig = '';
@@ -199,7 +980,7 @@ async function loadRoam({ force = false } = {}) {
   try {
     const ck = await api('/api/cookies' + (roam?.botId ? `?botId=${encodeURIComponent(roam.botId)}` : ''));
     if (roam) roam.cookies = ck.platforms || [];
-  } catch { /* 没配置也不影响 */ }
+  } catch {}
   renderRoam({ force });
 }
 
@@ -216,6 +997,7 @@ function roamSignature() {
     roam.clock?.windows,
     roam.clock?.next,
     (roam.platforms || []).map((p) => [p.key, p.ready]),
+    roamExpanded,
   ]);
 }
 
@@ -241,97 +1023,109 @@ function renderRoam({ force = false } = {}) {
   const platforms = roam.platforms || [];
   const next = clock.next ? new Date(clock.next.at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
   const on = Boolean(cfg.enabled);
+  const expanded = roamExpanded !== null ? roamExpanded : on;
   const rows = roamWindowRows(clock.windows || []);
   const bili = platforms.find((p) => p.key === 'bili') || {};
   const flags = cfg.platforms || {};
 
   box.innerHTML = `
-    <div class="card" style="margin-bottom:12px">
-      <header>
-        <h3>主动漫游（${on ? '已开启' : '已关闭'}）</h3>
-        <span class="tag ${on ? 'ok' : ''}">今日 ${gate.sentToday || 0}/${gate.limit ?? 3}</span>
+    <div class="card roam-card">
+      <div class="roam-head" id="roamToggleHead">
+        <h3>主动漫游</h3>
+        <span class="tag ${on ? 'ok' : ''}">${on ? '已开启' : '已关闭'}</span>
+        <span class="tag">今日 ${gate.sentToday || 0}/${gate.limit ?? 3}</span>
         <span class="tag ${gate.silentDays >= 3 ? 'warn' : ''}">沉默 ${gate.silentDays || 0} 天</span>
         <span class="tag">下次 ${next}</span>
-      </header>
-
-      <div class="row">
-        <div class="field"><label>开关</label>
-          <select id="roamEnabled">
-            <option value="false" ${on ? '' : 'selected'}>关闭</option>
-            <option value="true" ${on ? 'selected' : ''}>开启</option>
-          </select>
-        </div>
-        <div class="field"><label>随便翻翻的概率（0-1）</label><input id="roamSkip" value="${esc(String(clock.skipChance ?? 0.25))}"></div>
-        <div class="field"><label>每天最多推几条</label><input id="roamDaily" value="${esc(String(cfg.shareDaily ?? 3))}"></div>
-        <div class="field"><label>最低分（满分 20）</label><input id="roamMin" value="${esc(String(cfg.minScore ?? 13))}"></div>
+        <span class="roam-right">
+          <button id="roamNowQuick" type="button" onclick="event.stopPropagation()">立即漫游</button>
+          <button id="roamExpandBtn" class="ghost" type="button">${expanded ? '收起 ▴' : '展开配置 ▾'}</button>
+        </span>
       </div>
 
-      <div class="field">
-        <label>时间段（每个窗口内随机挑一分钟醒来）</label>
-        <div id="roamWinRows" style="display:flex;flex-direction:column;gap:6px">
-          ${rows.map((row, index) => `
-            <div class="row" data-win="${index}" style="align-items:center;gap:8px">
-              <input type="time" data-win-start value="${esc(row.start)}" style="flex:1">
-              <span class="muted">到</span>
-              <input type="time" data-win-end value="${esc(row.end)}" style="flex:1">
-              <button data-win-del="${index}" class="danger" style="flex:0 0 auto">删除</button>
-            </div>`).join('')}
+      <div class="roam-body" id="roamBody" ${expanded ? '' : 'hidden'}>
+        <div class="subgrid">
+          <div class="field"><label>漫游开关</label>
+            <select id="roamEnabled">
+              <option value="false" ${on ? '' : 'selected'}>关闭（仅响应你的消息）</option>
+              <option value="true" ${on ? 'selected' : ''}>开启（按时间段自动巡检分享）</option>
+            </select>
+          </div>
+          <div class="field"><label>随便翻翻跳过率（0-1）</label><input id="roamSkip" value="${esc(String(clock.skipChance ?? 0.25))}"></div>
+          <div class="field"><label>每天最多推送条数</label><input id="roamDaily" value="${esc(String(cfg.shareDaily ?? 3))}"></div>
+          <div class="field"><label>精选最低分（满分 20）</label><input id="roamMin" value="${esc(String(cfg.minScore ?? 13))}"></div>
         </div>
-        <div class="actions" style="margin-top:8px">
-          <button id="roamAddWin">+ 添加时间段</button>
-          <button id="roamBatchToggle">批量粘贴</button>
-        </div>
-        <div id="roamBatch" style="display:none;margin-top:8px">
-          <textarea id="roamBatchText" rows="3" placeholder="每行一个时间段，例如：&#10;12:30-13:45&#10;20:30-23:30"></textarea>
-          <div class="actions" style="margin-top:6px"><button id="roamBatchApply">用这些替换上面的时间段</button></div>
-        </div>
-      </div>
 
-      <div class="field">
-        <label>巡检平台（勾选才会去搜）</label>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
-          ${platforms.map((p) => `
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap">
-              <input type="checkbox" data-platform="${esc(p.key)}" ${flags[p.key] ?? p.enabled ? 'checked' : ''}>
-              ${esc(p.label)}
-              ${p.key === 'bili' ? `<span class="tag ${p.ready ? 'ok' : 'warn'}">${p.ready ? '已登录' : '未登录'}</span>` : ''}
-            </label>`).join('')}
+        <div class="field">
+          <label>活跃时间段（每个窗口内随机挑一分钟醒来）</label>
+          <div id="roamWinRows" style="display:flex;flex-direction:column;gap:6px">
+            ${rows.map((row, index) => `
+              <div class="row" data-win="${index}" style="align-items:center;gap:8px;flex-wrap:nowrap">
+                <input type="time" data-win-start value="${esc(row.start)}" style="flex:1;min-width:0">
+                <span class="muted">至</span>
+                <input type="time" data-win-end value="${esc(row.end)}" style="flex:1;min-width:0">
+                <button data-win-del="${index}" class="danger" style="flex:0 0 auto">删除</button>
+              </div>`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <button id="roamAddWin" type="button">+ 添加时间段</button>
+            <button id="roamBatchToggle" type="button">批量粘贴</button>
+          </div>
+          <div id="roamBatch" style="display:none;margin-top:8px">
+            <textarea id="roamBatchText" rows="3" placeholder="每行一个时间段，例如：&#10;12:30-13:45&#10;20:30-23:30"></textarea>
+            <div style="margin-top:6px"><button id="roamBatchApply" type="button">替换上面的时间段</button></div>
+          </div>
         </div>
-        <div class="muted" style="margin-top:6px;font-size:11px">${esc(bili.note || '')}</div>
-        <div class="actions" style="margin-top:8px">
-          <button id="biliLogin">${bili.ready ? 'B 站重新扫码' : 'B 站扫码登录'}</button>
-          <span class="muted" id="biliOut" style="align-self:center"></span>
-        </div>
-        <div id="biliQr" style="display:none;margin-top:10px;text-align:center">
-          <img alt="B站登录二维码" style="width:200px;height:200px;background:#fff;padding:8px;border-radius:10px">
-          <div class="muted" id="biliQrStatus" style="margin-top:6px">用手机 B 站扫一下</div>
-        </div>
-        <div class="actions" style="margin-top:10px">
-          <button id="cookieToggle">平台 Cookie（小红书 / 抖音 / X）</button>
-          <span class="muted" style="align-self:center;font-size:11px">这几个平台没有公开扫码接口，只能导入浏览器里的 Cookie</span>
-        </div>
-        <div id="cookieBox" style="display:none;margin-top:8px">
-          ${(roam.cookies || []).map((item) => {
-            const label = { xhs: '小红书', douyin: '抖音', twitter: 'X / Twitter' }[item.key] || item.key;
-            return `<div class="field">
-              <label>${esc(label)} ${item.configured ? '<span class="tag ok">已配置</span>' : '<span class="tag">未配置</span>'}</label>
-              <textarea data-cookie="${esc(item.key)}" rows="2" placeholder="粘贴该站点的 Cookie 字符串（从浏览器 DevTools → Network → 请求头里复制）"></textarea>
-            </div>`;
-          }).join('')}
-          <div class="actions"><button id="cookieSave">保存 Cookie</button><span class="muted" id="cookieOut" style="align-self:center"></span></div>
-        </div>
-      </div>
 
-      <div class="field"><label>偏好词（逗号分隔，影响选题）</label>
-        <input id="roamKeywords" value="${esc((cfg.keywords || []).join(', '))}" placeholder="AE 脚本, MCP, 开源工具">
-      </div>
+        <div class="field">
+          <label>巡检平台（勾选才会去搜）</label>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;padding:4px 0">
+            ${platforms.map((p) => `
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-sub);cursor:pointer;white-space:nowrap">
+                <input type="checkbox" data-platform="${esc(p.key)}" ${flags[p.key] ?? p.enabled ? 'checked' : ''}>
+                <span>${esc(p.label)}</span>
+                ${p.key === 'bili' ? `<span class="tag ${p.ready ? 'ok' : 'warn'}">${p.ready ? '已登录' : '未登录'}</span>` : ''}
+              </label>`).join('')}
+          </div>
+          ${bili.note ? `<div class="field-hint">${esc(bili.note)}</div>` : ''}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+            <button id="biliLogin" type="button">${bili.ready ? 'B 站重新扫码' : 'B 站扫码登录'}</button>
+            <button id="cookieToggle" type="button">平台 Cookie（小红书 / 抖音 / X）</button>
+            <span class="muted" id="biliOut"></span>
+          </div>
+          <div id="biliQr" style="display:none;margin-top:10px;text-align:center">
+            <img alt="B站登录二维码" style="width:190px;height:190px;background:#fff;padding:8px;border-radius:12px">
+            <div class="muted" id="biliQrStatus" style="margin-top:6px">用手机 B 站扫一下</div>
+          </div>
+          <div id="cookieBox" style="display:none;margin-top:10px;padding:12px;border-radius:12px;background:rgba(0,0,0,0.16);border:1px solid var(--line-soft)">
+            <div class="field-hint" style="margin-bottom:8px">小红书 / 抖音 / X 没有公开扫码接口，如需巡检可导入浏览器请求头中的 Cookie（仅存本地，不回显）。</div>
+            ${(roam.cookies || []).map((item) => {
+              const label = { xhs: '小红书', douyin: '抖音', twitter: 'X / Twitter' }[item.key] || item.key;
+              return `<div class="field">
+                <label>${esc(label)} ${item.configured ? '<span class="tag ok">已配置</span>' : '<span class="tag">未配置</span>'}</label>
+                <textarea data-cookie="${esc(item.key)}" rows="2" placeholder="粘贴该站点的 Cookie 字符串"></textarea>
+              </div>`;
+            }).join('')}
+            <div style="display:flex;gap:8px;align-items:center"><button id="cookieSave" type="button">保存 Cookie</button><span class="muted" id="cookieOut"></span></div>
+          </div>
+        </div>
 
-      <div class="actions">
-        <button class="primary" id="roamSave">保存漫游设置</button>
-        <button id="roamNow">立即漫游一次</button>
-        <span class="muted" id="roamOut" style="align-self:center"></span>
+        <div class="field"><label>兴趣偏好词（逗号分隔，影响选题打分）</label>
+          <input id="roamKeywords" value="${esc((cfg.keywords || []).join(', '))}" placeholder="AE 脚本, MCP, 开源工具">
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="roamSave" type="button">保存漫游设置</button>
+          <button id="roamNow" type="button">立即漫游一次</button>
+          <span class="muted" id="roamOut"></span>
+        </div>
       </div>
     </div>`;
+
+  const toggleExpand = () => {
+    roamExpanded = !expanded;
+    renderRoam({ force: true });
+  };
+  box.querySelector('#roamToggleHead').onclick = toggleExpand;
 
   const collectWindows = () => {
     const out = [];
@@ -346,10 +1140,10 @@ function renderRoam({ force = false } = {}) {
   const repaintRows = (windows) => {
     const container = box.querySelector('#roamWinRows');
     container.innerHTML = roamWindowRows(windows).map((row, index) => `
-      <div class="row" data-win="${index}" style="align-items:center;gap:8px">
-        <input type="time" data-win-start value="${esc(row.start)}" style="flex:1">
-        <span class="muted">到</span>
-        <input type="time" data-win-end value="${esc(row.end)}" style="flex:1">
+      <div class="row" data-win="${index}" style="align-items:center;gap:8px;flex-wrap:nowrap">
+        <input type="time" data-win-start value="${esc(row.start)}" style="flex:1;min-width:0">
+        <span class="muted">至</span>
+        <input type="time" data-win-end value="${esc(row.end)}" style="flex:1;min-width:0">
         <button data-win-del="${index}" class="danger" style="flex:0 0 auto">删除</button>
       </div>`).join('');
     bindRowButtons();
@@ -385,7 +1179,6 @@ function renderRoam({ force = false } = {}) {
     toast(`已导入 ${parsed.length} 个时间段，记得保存`);
   };
 
-  // 平台 Cookie
   box.querySelector('#cookieToggle').onclick = () => {
     const area = box.querySelector('#cookieBox');
     area.style.display = area.style.display === 'none' ? 'block' : 'none';
@@ -396,20 +1189,21 @@ function renderRoam({ force = false } = {}) {
     try {
       const areas = [...box.querySelectorAll('[data-cookie]')];
       for (const area of areas) {
+        const val = area.value.trim();
+        if (!val) continue;
         await api('/api/cookies', {
           method: 'POST',
-          body: { botId: roam.botId, platform: area.dataset.cookie, cookie: area.value.trim() },
+          body: { botId: roam.botId, platform: area.dataset.cookie, cookie: val },
         });
         area.value = '';
       }
-      out.textContent = '已保存（只存本地，不会回显）';
-      await loadRoam();
+      out.textContent = '已保存';
+      await loadRoam({ force: true });
     } catch (error) {
       out.textContent = '保存失败：' + error.message;
     }
   };
 
-  // B 站扫码
   box.querySelector('#biliLogin').onclick = async () => {
     const out = box.querySelector('#biliOut');
     const wrap = box.querySelector('#biliQr');
@@ -436,7 +1230,7 @@ function renderRoam({ force = false } = {}) {
             status.textContent = `已登录：${res.name || ''}`;
             toast(`B 站已登录${res.name ? '：' + res.name : ''}`);
             wrap.style.display = 'none';
-            await loadRoam();
+            await loadRoam({ force: true });
             return;
           } else if (res.error) { status.textContent = '失败：' + res.error; return; }
         }
@@ -457,12 +1251,13 @@ function renderRoam({ force = false } = {}) {
     box.querySelectorAll('[data-platform]').forEach((input) => { platformFlags[input.dataset.platform] = input.checked; });
     out.textContent = '保存中…';
     try {
+      const enabled = box.querySelector('#roamEnabled').value === 'true';
       const data = await api('/api/proactive/config', {
         method: 'POST',
         body: {
           botId,
           proactive: {
-            enabled: box.querySelector('#roamEnabled').value === 'true',
+            enabled,
             windows,
             skipChance: Number(box.querySelector('#roamSkip').value || 0.25),
             shareDaily: Number(box.querySelector('#roamDaily').value || 3),
@@ -473,7 +1268,9 @@ function renderRoam({ force = false } = {}) {
         },
       });
       out.textContent = '已保存，计划已重算';
+      toast('漫游设置已保存');
       roamDirty = false;
+      roamExpanded = enabled;
       lastRoamSig = '';
       roam = { ...roam, ...data, config: data.config };
       renderRoam({ force: true });
@@ -483,28 +1280,36 @@ function renderRoam({ force = false } = {}) {
     }
   };
 
-  box.querySelector('#roamNow').onclick = async () => {
-    const btn = box.querySelector('#roamNow');
+  const triggerRoamNow = async (btn) => {
     const out = box.querySelector('#roamOut');
     btn.disabled = true;
-    out.textContent = '正在刷…（要拉字幕/弹幕，可能要十几秒）';
+    if (out) out.textContent = '正在巡检中…';
+    toast('开始主动漫游巡检…');
     try {
       const data = await api('/api/proactive/roam', { method: 'POST', body: { botId: roam.botId || bots[0]?.id } });
       const pushed = data.pushed || [];
       const skipped = data.skipped || [];
-      out.textContent = pushed.length
-        ? `推了 ${pushed.length} 条：${pushed.map((x) => x.title.slice(0, 14)).join(' / ')}`
-        : `没推：${skipped.slice(0, 2).map((x) => x.reason).join('；') || '没有候选'}`;
-      await loadRoam();
+      const summary = pushed.length
+        ? `推送了 ${pushed.length} 条：${pushed.map((x) => x.title.slice(0, 14)).join(' / ')}`
+        : `未推送：${skipped.slice(0, 2).map((x) => x.reason).join('；') || '暂无符合条件的内容'}`;
+      if (out) out.textContent = summary;
+      toast(summary);
+      await loadRoam({ force: true });
     } catch (error) {
-      out.textContent = '失败：' + error.message;
+      if (out) out.textContent = '失败：' + error.message;
+      toast('漫游失败：' + error.message, true);
     } finally {
       btn.disabled = false;
     }
   };
+
+  box.querySelector('#roamNow').onclick = (e) => triggerRoamNow(e.currentTarget);
+  box.querySelector('#roamNowQuick').onclick = (e) => { e.stopPropagation(); triggerRoamNow(e.currentTarget); };
 }
 
-async function refresh() {
+// ---------------------------------------------------------------- 主状态刷新与机器人卡片
+
+async function refresh({ refreshModels = false } = {}) {
   try {
     health = await api('/api/health');
     bots = (await api('/api/bots')).bots;
@@ -513,32 +1318,37 @@ async function refresh() {
     toast('读取状态失败：' + error.message, true);
     return;
   }
+  const verEl = document.getElementById('appVer');
+  if (verEl && health.version) verEl.textContent = 'v' + health.version;
   const wb = health.workbench || {};
   document.getElementById('wbDot').className = 'dot ' + (wb.connected ? 'ok' : (wb.ready ? 'warn' : 'bad'));
   document.getElementById('wbText').textContent = wb.connected
     ? `已连接 :${wb.port}`
-    : (wb.ready ? '待命（首次发送时连接）' : (wb.reason || '未连接'));
-  document.getElementById('wbText').title = wb.reason || (wb.title ? `目标：${wb.title}` : '');
+    : (wb.ready ? '待命' : (wb.reason ? '未连接' : '离线'));
+  document.getElementById('wbPill').title = wb.reason || (wb.title ? `工作台：${wb.title}` : '');
   document.getElementById('runText').textContent = health.running || 0;
   document.getElementById('deferText').textContent = health.deferred || 0;
   renderTabs();
   renderBots();
-  if (!models.loaded && !models.loading) loadModels();
+  if (refreshModels || (!models.loaded && !models.loading)) loadModels({ force: refreshModels, silent: !refreshModels });
   loadRoam();
 }
 
-// 周期性 refresh 不再无脑重绘：内容没变就不动 DOM，用户正在编辑时也不动
 let lastTabsSig = '';
 let lastBotsSig = '';
 
 function botsSignature() {
   return JSON.stringify([
+    activePlatform,
     bots.map((b) => [
       b.id, b.platform, b.alias, b.status, b.lastError || '', b.enabled !== false,
       b.defaultWorkspace || '', b.defaultModel || '', b.defaultConversation || '',
       b.busyMode || '', Boolean(b.allowAll), Boolean(b.syncEnabled), Boolean(b.groupAtOptional), b.ackEnabled !== false, b.ackEmoji || 'Get',
     ]),
     bindings.map((item) => [item.key, item.conversationId || '']),
+    models.items,
+    models.ok,
+    models.error,
   ]);
 }
 
@@ -555,9 +1365,9 @@ function renderTabs() {
   if (tabsSig === lastTabsSig) return;
   lastTabsSig = tabsSig;
   const tabs = [['all', '全部'], ['weixin', '微信'], ['qq', 'QQ'], ['feishu', '飞书']]
-    .map(([key, label]) => `<button class="tab" data-platform="${key}" data-active="${activePlatform === key}">${label} ${counts[key] || 0}</button>`)
+    .map(([key, label]) => `<button class="tab" data-platform="${key}" data-active="${activePlatform === key}">${label} <span style="opacity:.7">${counts[key] || 0}</span></button>`)
     .join('');
-  document.getElementById('tabs').innerHTML = tabs + `<button class="tab" id="addBot" data-active="false">+ 添加机器人</button>`;
+  document.getElementById('tabs').innerHTML = tabs + `<button class="tab add-btn" id="addBot" data-active="false">+ 添加机器人</button>`;
   document.querySelectorAll('#tabs .tab[data-platform]').forEach((btn) => {
     btn.onclick = () => { activePlatform = btn.dataset.platform; renderTabs(); renderBots(); };
   });
@@ -572,7 +1382,7 @@ function renderBots({ force = false } = {}) {
     renderBotsInner();
   } catch (error) {
     document.getElementById('bots').innerHTML =
-      `<div class="empty" style="color:#ffb4ae">面板渲染出错：${esc(error.message)}</div>`;
+      `<div class="empty" style="color:var(--bad)">面板渲染出错：${esc(error.message)}</div>`;
   }
 }
 
@@ -580,38 +1390,48 @@ function renderBotsInner() {
   const list = bots.filter((bot) => activePlatform === 'all' || bot.platform === activePlatform);
   const box = document.getElementById('bots');
   if (!list.length) {
-    box.innerHTML = '<div class="empty">还没有机器人。点「+ 添加机器人」开始：微信 / QQ / 飞书 都支持扫码一键创建，也可以填凭据。</div>';
+    box.innerHTML = '<div class="empty">还没有机器人。点击右上角「+ 添加机器人」即可开始：微信 / QQ / 飞书均支持扫码快速绑定。</div>';
     return;
   }
-  box.innerHTML = list.map((bot) => `
+  box.innerHTML = list.map((bot) => {
+    const isFeishu = bot.platform === 'feishu';
+    const ackOn = bot.ackEnabled !== false;
+    return `
     <div class="card" data-id="${esc(bot.id)}">
       <header>
+        <span class="plat-badge ${esc(bot.platform)}">${esc(PLATFORM[bot.platform]?.label || bot.platform)}</span>
         <h3>${esc(bot.alias || bot.id)}</h3>
         ${statusTag(bot.status)}
-        <span class="tag">${esc(PLATFORM[bot.platform]?.label || bot.platform)}</span>
       </header>
-      <div class="field"><label>默认工作区</label>
-        <input data-field="defaultWorkspace" value="${esc(bot.defaultWorkspace || '')}" placeholder="F:/AI/nocode/nocode">
+
+      <div class="field">
+        <label>默认工作区</label>
+        <input data-field="defaultWorkspace" list="workspaceList" value="${esc(bot.defaultWorkspace || '')}" placeholder="例如 F:/AI/tool">
       </div>
-      <div class="row">
-        <div class="field"><label>默认模型（自动读取可用列表）</label>
-          <select data-field="defaultModel">${modelOptions(bot)}</select>
-          <div class="muted" style="font-size:11px">
-            ${models.loading
-              ? '正在读取模型列表…'
-              : models.error
-                ? `读不到模型列表：${esc(models.error)}`
-                : `界面当前：${esc(models.current || '—')}`}
-          </div>
-        </div>
+
+      <div class="field">
+        <label>
+          <span>默认模型</span>
+          <span class="ag-model-live-hint" style="font-size:11px;color:var(--muted);font-weight:400">
+            ${models.loading ? '同步中…' : models.error ? `未同步：${esc(models.error)}` : `桌面当前：${esc(models.current || '—')}`}
+          </span>
+        </label>
+        <select data-field="defaultModel">${buildGroupedModelOptions(bot.defaultModel || '')}</select>
+      </div>
+
+      <div class="field">
+        <label>绑定会话</label>
+        <select data-field="binding"></select>
+        <div class="field-hint">不指定 = 清空旧绑定，下条消息自动新开对话并持续跟随该对话</div>
+      </div>
+
+      <div class="subgrid">
         <div class="field"><label>忙碌策略</label>
           <select data-field="busyMode">
             <option value="queue" ${bot.busyMode !== 'steer' ? 'selected' : ''}>排队依次执行</option>
             <option value="steer" ${bot.busyMode === 'steer' ? 'selected' : ''}>直接插话打断</option>
           </select>
         </div>
-      </div>
-      <div class="row">
         <div class="field"><label>访问策略</label>
           <select data-field="allowAll">
             <option value="false" ${bot.allowAll ? '' : 'selected'}>仅主人 / 白名单</option>
@@ -624,40 +1444,39 @@ function renderBotsInner() {
             <option value="true" ${bot.syncEnabled ? 'selected' : ''}>桌面 ↔ 手机镜像</option>
           </select>
         </div>
-        <div class="field"><label>回执</label>
-          <select data-field="ackEnabled">
-            <option value="true" ${bot.ackEnabled === false ? '' : 'selected'}>收到时给个回执（飞书=表情，微信/QQ=短文本）</option>
-            <option value="false" ${bot.ackEnabled === false ? 'selected' : ''}>不回执（直接等结果）</option>
+        <div class="field"><label>群聊响应</label>
+          <select data-field="groupAtOptional">
+            <option value="false" ${bot.groupAtOptional ? '' : 'selected'}>必须 @机器人</option>
+            <option value="true" ${bot.groupAtOptional ? 'selected' : ''}>群里不 @ 也响应</option>
           </select>
         </div>
+        <div class="field"><label>收到回执</label>
+          <select data-field="ackEnabled">
+            <option value="true" ${ackOn ? 'selected' : ''}>${isFeishu ? '收到时加表情回应' : '收到时发短回执'}</option>
+            <option value="false" ${!ackOn ? 'selected' : ''}>不回执（直接等结果）</option>
+          </select>
+        </div>
+        ${isFeishu ? `
         <div class="field"><label>回执表情（飞书）</label>
           <select data-field="ackEmoji">
             ${['Get', 'OK', 'DONE', 'CheckMark', 'OnIt', 'THUMBSUP', 'THANKS']
               .map((e) => `<option value="${e}" ${(bot.ackEmoji || 'Get') === e ? 'selected' : ''}>${e}${e === 'Get' ? '（收到）' : ''}</option>`)
               .join('')}
           </select>
-        </div>
+        </div>` : ''}
       </div>
-      <div class="field"><label>群聊</label>
-        <select data-field="groupAtOptional">
-          <option value="false" ${bot.groupAtOptional ? '' : 'selected'}>必须 @机器人</option>
-          <option value="true" ${bot.groupAtOptional ? 'selected' : ''}>群里不 @ 也响应</option>
-        </select>
-      </div>
-      <div class="field"><label>绑定会话</label>
-        <select data-field="binding"></select>
-        <div class="muted" style="font-size:11px;margin-top:4px">不指定 = 清空旧绑定，下条消息自动新开对话，之后继续用新会话</div>
-      </div>
-      ${bot.lastError ? `<div class="muted" style="color:#ffb4ae">${esc(bot.lastError)}</div>` : ''}
+
+      ${bot.lastError ? `<div class="error-banner">${esc(bot.lastError)}</div>` : ''}
+
       <div class="actions">
-        <button data-act="save" class="primary">保存</button>
-        <button data-act="test">发测试消息</button>
-        <button data-act="self-test">自检一次</button>
-        <button data-act="reload-models">重新读取模型</button>
-        <button data-act="scan">${bot.platform === 'weixin' ? '重新扫码' : '重新连接'}</button>
-        <button data-act="remove" class="danger">移除</button>
+        <button data-act="save" class="primary">保存设置</button>
+        <button data-act="test">发测试</button>
+        <button data-act="self-test">自检</button>
+        <button data-act="scan">${bot.platform === 'weixin' ? '重新扫码' : '重连'}</button>
+        <button data-act="remove" class="danger spacer">移除</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   document.querySelectorAll('#bots .card').forEach((card) => wireCard(card, bots.find((b) => b.id === card.dataset.id)));
 }
@@ -666,9 +1485,8 @@ async function wireCard(card, bot) {
   const bindingSelect = card.querySelector('[data-field="binding"]');
   try {
     const data = await api('/api/conversations?limit=30' + (bot.defaultWorkspace ? `&workspace=${encodeURIComponent(bot.defaultWorkspace)}` : ''));
-    const bindings = await api('/api/state');
-    const mine = (bindings.bindings || []).filter((item) => item.key.startsWith(bot.id + ':'));
-    // 只反映这个聊天的绑定；没绑定就停在「不指定」
+    const st = await api('/api/state');
+    const mine = (st.bindings || []).filter((item) => item.key.startsWith(bot.id + ':'));
     const current = mine[0]?.conversationId || '';
     bindingSelect.innerHTML = `<option value="">— 不指定（自动新开对话）—</option>` +
       (data.items || []).map((item) => `<option value="${esc(item.id)}" ${item.id === current ? 'selected' : ''}>${esc(item.title || item.id.slice(0, 8))} [${esc(item.status)}]</option>`).join('');
@@ -689,14 +1507,13 @@ async function wireCard(card, bot) {
       try {
         if (act === 'save') {
           await api(`/api/bots/${bot.id}`, { method: 'POST', body: patch });
-          // 下拉只决定"这个聊天发到哪个对话"：选了就绑定，选"不指定"就清空该机器人全部旧绑定
           const convId = bindingSelect.value;
           const chatId = bindingSelect.dataset.chatId;
           if (convId) {
             if (chatId) {
               await api('/api/bind', { method: 'POST', body: { botId: bot.id, chatId, conversationId: convId } });
             } else {
-              toast('已保存。这个机器人还没有私聊记录，先在手机上发一条消息再绑定对话');
+              toast('设置已保存；请先在手机端给该机器人发一条消息再绑定指定会话');
               lastBotsSig = '';
               await refresh();
               return;
@@ -704,7 +1521,7 @@ async function wireCard(card, bot) {
           } else {
             await api('/api/unbind', { method: 'POST', body: { botId: bot.id, all: true } });
           }
-          toast('已保存');
+          toast('设置已保存');
           lastBotsSig = '';
           lastTabsSig = '';
           await refresh();
@@ -714,7 +1531,7 @@ async function wireCard(card, bot) {
             const data = await api('/api/self-test', { method: 'POST', body: { botId: bot.id, text: '自检：只回复两个字 收到' } });
             const conv = data.result?.result?.conversationId || '';
             const reply = (data.replies || []).map((r) => r.text).filter(Boolean).pop() || '';
-            toast(`自检通过：${conv ? '会话 ' + conv.slice(0, 8) + ' ' : ''}回复「${reply.slice(0, 20)}」`);
+            toast(`自检通过：${conv ? '会话 ' + conv.slice(0, 8) + ' · ' : ''}回复「${reply.slice(0, 20)}」`);
             lastBotsSig = '';
             await refresh();
           } catch (error) {
@@ -722,17 +1539,18 @@ async function wireCard(card, bot) {
           } finally {
             btn.disabled = false;
           }
-        } else if (act === 'reload-models') {
-          await loadModels({ force: true });
-          toast('模型列表已刷新');
         } else if (act === 'test') {
           await api('/api/test-message', { method: 'POST', body: { botId: bot.id, chatId: bindingSelect.dataset.chatId || '', text: 'antigravity远程-mogu 连接测试 ✅' } });
           toast('测试消息已发送');
         } else if (act === 'scan') {
           if (bot.platform === 'weixin') await openScan(bot.id);
-          else { await api(`/api/bots/${bot.id}`, { method: 'POST', body: { ...patch, enabled: true } }); toast('已请求重连'); await refresh(); }
+          else {
+            await api(`/api/bots/${bot.id}`, { method: 'POST', body: { ...patch, enabled: true } });
+            toast('已请求重连');
+            await refresh();
+          }
         } else if (act === 'remove') {
-          if (!confirm(`移除机器人「${bot.alias || bot.id}」？`)) return;
+          if (!confirm(`确定移除机器人「${bot.alias || bot.id}」吗？`)) return;
           await api(`/api/bots/${bot.id}`, { method: 'DELETE' });
           toast('已移除');
           await refresh();
@@ -744,26 +1562,51 @@ async function wireCard(card, bot) {
   });
 }
 
-// ---------------------------------------------------------------- 添加机器人
+// ---------------------------------------------------------------- 添加 / 重新扫码机器人
 
 const ADD_HINT = {
-  weixin: '扫码绑定，免 PC 微信、免公网。',
-  qq: '扫码一键创建官方机器人（自动回填 AppID/AppSecret），也可以手动填凭据或走 OneBot。',
-  feishu: '扫码一键创建应用并配好消息权限；也可以手动填 App ID / Secret。',
+  weixin: '扫码绑定，免 PC 微信、免公网配置。',
+  qq: '扫码一键创建官方机器人（自动回填凭据），也可以手动填凭据或接入 OneBot。',
+  feishu: '扫码一键创建应用并配好消息权限；也可以手动填写 App ID / Secret。',
 };
+
+function closeModal() {
+  cancelScan();
+  document.getElementById('modal').dataset.open = 'false';
+}
+
+function openScan(botId) {
+  cancelScan();
+  const modal = document.getElementById('modal');
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h2>微信重新扫码绑定</h2>
+      <button class="ghost" id="closeModalBtn" aria-label="关闭">×</button>
+    </div>
+    <div class="muted" style="margin-bottom:12px">使用手机微信扫下方二维码重新授权，现有机器人设置会完整保留。</div>
+    <div id="scanBox" class="qr"></div>`;
+  modal.dataset.open = 'true';
+  sheet.querySelector('#closeModalBtn').onclick = closeModal;
+  startScan(sheet, 'weixin', { botId });
+}
 
 function openAddBot(platform = 'weixin') {
   cancelScan();
   const modal = document.getElementById('modal');
   const sheet = document.getElementById('sheet');
   sheet.innerHTML = `
-    <h2 style="margin:0 0 4px;font-size:15px">添加机器人</h2>
-    <div class="muted" style="margin-bottom:12px">${esc(ADD_HINT[platform] || '')}</div>
+    <div class="sheet-head">
+      <h2>添加机器人</h2>
+      <button class="ghost" id="closeModalBtn" aria-label="关闭">×</button>
+    </div>
+    <div class="muted" id="addHintText" style="margin-bottom:12px">${esc(ADD_HINT[platform] || '')}</div>
     <div class="tabs" style="margin:0 0 12px">
       ${['weixin', 'qq', 'feishu'].map((key) => `<button class="tab" data-pick="${key}" data-active="${platform === key}">${PLATFORM[key].label}</button>`).join('')}
     </div>
     <div id="addBody"></div>`;
   modal.dataset.open = 'true';
+  sheet.querySelector('#closeModalBtn').onclick = closeModal;
   const body = sheet.querySelector('#addBody');
 
   sheet.querySelectorAll('[data-pick]').forEach((btn) => {
@@ -771,7 +1614,7 @@ function openAddBot(platform = 'weixin') {
       if (btn.dataset.active === 'true') return;
       cancelScan();
       sheet.querySelectorAll('[data-pick]').forEach((b) => { b.dataset.active = String(b === btn); });
-      sheet.querySelector('.muted').textContent = ADD_HINT[btn.dataset.pick] || '';
+      sheet.querySelector('#addHintText').textContent = ADD_HINT[btn.dataset.pick] || '';
       renderAdd(body, btn.dataset.pick);
     };
   });
@@ -782,7 +1625,7 @@ function openAddBot(platform = 'weixin') {
 function renderAdd(body, platform) {
   const modes = platform === 'weixin'
     ? [['scan', '扫码绑定']]
-    : [['scan', '扫码创建（推荐）'], ['manual', '填凭据']];
+    : [['scan', '扫码创建（推荐）'], ['manual', '手动填凭据']];
   body.innerHTML = `
     <div class="tabs" style="margin:0 0 12px">
       ${modes.map(([mode, label], index) => `<button class="tab" data-mode="${mode}" data-active="${index === 0}">${label}</button>`).join('')}
@@ -800,22 +1643,172 @@ function renderAdd(body, platform) {
 }
 
 const SCAN_HINT = {
-  weixin: '用手机微信扫下面的二维码确认即可（不需要 PC 微信）。',
-  qq: '用手机 QQ 扫码，会自动创建/选择机器人并回填 AppID/AppSecret。',
-  feishu: '用手机飞书扫码，会自动创建应用并配好消息权限。',
+  weixin: '用手机微信扫下面的二维码确认即可（不需要登录 PC 微信）。',
+  qq: '用手机 QQ 扫码，会自动创建或选择机器人并回填 AppID / AppSecret。',
+  feishu: '用手机飞书扫码，会自动创建自建应用并配置好消息权限。',
 };
 
 function paintScan(box, platform) {
   box.innerHTML = `
-    <div class="muted" style="margin-bottom:10px">${esc(SCAN_HINT[platform] || '')}</div>
+    <div class="muted" style="margin-bottom:12px">${esc(SCAN_HINT[platform] || '')}</div>
     <button class="primary" id="doScan">生成二维码</button>
     <div id="scanBox" class="qr"></div>`;
   box.querySelector('#doScan').onclick = () => startScan(box, platform);
 }
 
-// 扫码会话：同一时刻只允许一个轮询在跑（切平台/切模式/关弹窗都会作废旧的）
+function paintManual(box, platform) {
+  if (platform === 'feishu') {
+    box.innerHTML = `
+      <div class="field"><label>机器人备注名（可选）</label><input id="mAlias" placeholder="例如：飞书工作助手"></div>
+      <div class="field"><label>平台区域</label>
+        <select id="mDomain">
+          <option value="feishu" selected>飞书国内版（open.feishu.cn）</option>
+          <option value="lark">Lark 国际版（open.larksuite.com）</option>
+        </select>
+      </div>
+      <div class="field"><label>App ID</label><input id="mAppId" placeholder="cli_xxxxxxxxxx"></div>
+      <div class="field"><label>App Secret</label><input id="mAppSecret" type="password" placeholder="粘贴飞书应用 Secret"></div>
+      <div id="mVerifyOut" class="muted" style="margin:6px 0"></div>
+      <div class="actions">
+        <button id="mVerify" type="button">校验凭据</button>
+        <button id="mSubmit" class="primary" type="button">添加并启动</button>
+      </div>`;
+    box.querySelector('#mVerify').onclick = async () => {
+      const out = box.querySelector('#mVerifyOut');
+      out.textContent = '校验中…';
+      try {
+        const res = await api('/api/verify', {
+          method: 'POST',
+          body: {
+            platform: 'feishu',
+            secrets: {
+              domain: box.querySelector('#mDomain').value,
+              appId: box.querySelector('#mAppId').value.trim(),
+              appSecret: box.querySelector('#mAppSecret').value.trim(),
+            },
+          },
+        });
+        out.innerHTML = `<span style="color:var(--ok)">校验通过：${esc(res.info?.name || '飞书机器人')}</span>`;
+        if (!box.querySelector('#mAlias').value.trim() && res.info?.name) {
+          box.querySelector('#mAlias').value = res.info.name;
+        }
+      } catch (error) {
+        out.innerHTML = `<span style="color:var(--bad)">${esc(error.message)}</span>`;
+      }
+    };
+    box.querySelector('#mSubmit').onclick = async () => {
+      const appId = box.querySelector('#mAppId').value.trim();
+      const appSecret = box.querySelector('#mAppSecret').value.trim();
+      if (!appId || !appSecret) return toast('App ID 与 App Secret 必填', true);
+      try {
+        await api('/api/bots', {
+          method: 'POST',
+          body: {
+            platform: 'feishu',
+            alias: box.querySelector('#mAlias').value.trim() || '飞书机器人',
+            secrets: { domain: box.querySelector('#mDomain').value, appId, appSecret },
+          },
+        });
+        toast('飞书机器人已添加');
+        closeModal();
+        await refresh();
+      } catch (error) {
+        toast('添加失败：' + error.message, true);
+      }
+    };
+    return;
+  }
+
+  // QQ 手动凭据：支持官方机器人或 OneBot v11
+  box.innerHTML = `
+    <div class="field"><label>接入方式</label>
+      <select id="mQqMode">
+        <option value="official" selected>QQ 官方机器人（AppID + AppSecret）</option>
+        <option value="onebot">OneBot v11（个人 QQ · NapCat / Lagrange）</option>
+      </select>
+    </div>
+    <div class="field"><label>机器人备注名（可选）</label><input id="mAlias" placeholder="例如：QQ助手"></div>
+    <div id="qqOfficialFields">
+      <div class="field"><label>App ID</label><input id="mQqAppId" placeholder="输入 QQ 开放平台 AppID"></div>
+      <div class="field"><label>App Secret</label><input id="mQqAppSecret" type="password" placeholder="输入 QQ 开放平台 AppSecret"></div>
+    </div>
+    <div id="qqOnebotFields" hidden>
+      <div class="subgrid">
+        <div class="field"><label>反向 WS 监听端口</label><input id="mObPort" value="8792"></div>
+        <div class="field"><label>反向 WS 路径</label><input id="mObPath" value="/onebot/ws"></div>
+      </div>
+      <div class="field-hint">在 NapCat / Lagrange 中新增反向 WebSocket 地址：<code>ws://127.0.0.1:8792/onebot/ws</code></div>
+    </div>
+    <div id="mVerifyOut" class="muted" style="margin:6px 0"></div>
+    <div class="actions">
+      <button id="mVerify" type="button">校验凭据</button>
+      <button id="mSubmit" class="primary" type="button">添加并启动</button>
+    </div>`;
+
+  const modeSel = box.querySelector('#mQqMode');
+  const syncQqMode = () => {
+    const isOnebot = modeSel.value === 'onebot';
+    box.querySelector('#qqOfficialFields').hidden = isOnebot;
+    box.querySelector('#qqOnebotFields').hidden = !isOnebot;
+    box.querySelector('#mVerify').hidden = isOnebot;
+  };
+  modeSel.onchange = syncQqMode;
+
+  box.querySelector('#mVerify').onclick = async () => {
+    const out = box.querySelector('#mVerifyOut');
+    out.textContent = '校验中…';
+    try {
+      await api('/api/verify', {
+        method: 'POST',
+        body: {
+          platform: 'qq',
+          secrets: {
+            appId: box.querySelector('#mQqAppId').value.trim(),
+            appSecret: box.querySelector('#mQqAppSecret').value.trim(),
+          },
+        },
+      });
+      out.innerHTML = '<span style="color:var(--ok)">凭据有效</span>';
+    } catch (error) {
+      out.innerHTML = `<span style="color:var(--bad)">${esc(error.message)}</span>`;
+    }
+  };
+
+  box.querySelector('#mSubmit').onclick = async () => {
+    const isOnebot = modeSel.value === 'onebot';
+    const secrets = isOnebot
+      ? {
+          mode: 'onebot',
+          port: Number(box.querySelector('#mObPort').value || 8792),
+          path: box.querySelector('#mObPath').value.trim() || '/onebot/ws',
+        }
+      : {
+          mode: 'official',
+          appId: box.querySelector('#mQqAppId').value.trim(),
+          appSecret: box.querySelector('#mQqAppSecret').value.trim(),
+        };
+    if (!isOnebot && (!secrets.appId || !secrets.appSecret)) return toast('AppID 与 AppSecret 必填', true);
+    try {
+      await api('/api/bots', {
+        method: 'POST',
+        body: {
+          platform: 'qq',
+          alias: box.querySelector('#mAlias').value.trim() || (isOnebot ? 'OneBot QQ' : 'QQ机器人'),
+          secrets,
+        },
+      });
+      toast('QQ 机器人已添加');
+      closeModal();
+      await refresh();
+    } catch (error) {
+      toast('添加失败：' + error.message, true);
+    }
+  };
+}
+
+// 扫码会话：同一时刻只允许一个轮询在跑
 let scanToken = 0;
-let activeScan = null; // { token, sessionId, platform }
+let activeScan = null;
 
 const SCAN_TEXT = {
   wait: '请用手机扫码',
@@ -824,11 +1817,10 @@ const SCAN_TEXT = {
   confirmed: '已确认，正在绑定…',
   success: '已确认，正在绑定…',
   bound: '已绑定',
-  expired: '二维码已过期，点「生成二维码」重来',
+  expired: '二维码已过期，重新生成即可',
   cancelled: '已取消',
 };
 
-/** 作废当前扫码：停轮询 + 通知后端别再拉平台接口。 */
 function cancelScan() {
   scanToken += 1;
   const previous = activeScan;
@@ -838,7 +1830,7 @@ function cancelScan() {
   }
 }
 
-async function startScan(box, platform) {
+async function startScan(box, platform, extra = {}) {
   cancelScan();
   const token = scanToken;
   const holder = box.querySelector('#scanBox');
@@ -847,13 +1839,12 @@ async function startScan(box, platform) {
 
   let session;
   try {
-    ({ session } = await api('/api/scan', { method: 'POST', body: { platform } }));
+    ({ session } = await api('/api/scan', { method: 'POST', body: { platform, ...extra } }));
   } catch (error) {
-    if (token === scanToken) holder.innerHTML = `<div class="muted" style="color:#ffb4ae">申请失败：${esc(error.message)}</div>`;
+    if (token === scanToken) holder.innerHTML = `<div class="muted" style="color:var(--bad)">申请失败：${esc(error.message)}</div>`;
     return;
   }
   if (token !== scanToken || !holder.isConnected) {
-    // 用户已经切走/关掉了：把刚建的会话也撤掉，别让它继续拉平台接口
     fetch(API + '/api/scan/' + session.id, { method: 'DELETE' }).catch(() => {});
     return;
   }
@@ -870,7 +1861,6 @@ async function pollScan({ token, holder, sessionId }) {
   const statusEl = () => holder.querySelector('.agb-scan-status');
   for (let i = 0; i < 240; i += 1) {
     await new Promise((r) => setTimeout(r, 1500));
-    // 关键：会话被切走 / 弹窗关了 / 节点被替换，就立刻停，绝不写到别的框里
     if (token !== scanToken || !holder.isConnected) return;
 
     let session;
@@ -898,7 +1888,7 @@ async function pollScan({ token, holder, sessionId }) {
     if (session.status === 'bound') {
       activeScan = null;
       toast('机器人已绑定');
-      document.getElementById('modal').dataset.open = 'false';
+      closeModal();
       await refresh();
       return;
     }
@@ -910,15 +1900,17 @@ async function pollScan({ token, holder, sessionId }) {
   }
 }
 
-document.getElementById('refresh').onclick = () => refresh();
+// ---------------------------------------------------------------- 事件与诊断
+
+document.getElementById('refresh').onclick = () => {
+  lastBotsSig = '';
+  refresh({ refreshModels: true });
+};
 document.getElementById('modal').onclick = (event) => {
-  if (event.target.id !== 'modal') return;
-  cancelScan();
-  document.getElementById('modal').dataset.open = 'false';
+  if (event.target.id === 'modal') closeModal();
 };
 
 const eventLog = [];
-// 面板里任何未捕获的错误都提示出来，避免"点了没反应/界面像崩了"
 window.addEventListener('error', (event) => toast('面板脚本出错：' + (event.message || '未知'), true));
 window.addEventListener('unhandledrejection', (event) => {
   const reason = event.reason;
@@ -926,7 +1918,14 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 const events = new EventSource('/api/events');
-for (const name of ['message', 'reply', 'progress', 'scan', 'mirror']) {
+events.addEventListener('models', (ev) => {
+  try {
+    const payload = JSON.parse(ev.data);
+    applyModelsPayload(payload);
+    renderBots();
+  } catch {}
+});
+for (const name of ['message', 'reply', 'progress', 'scan', 'mirror', 'roam']) {
   events.addEventListener(name, (ev) => {
     try {
       eventLog.push({ at: new Date().toLocaleTimeString(), name, data: JSON.parse(ev.data) });
@@ -948,19 +1947,23 @@ document.getElementById('diag').onclick = async () => {
     healthText = '读取失败：' + error.message;
   }
   sheet.innerHTML = `
-    <h2 style="margin:0 0 8px;font-size:15px">诊断</h2>
+    <div class="sheet-head">
+      <h2>连接与运行诊断</h2>
+      <button class="ghost" id="closeDiagX" aria-label="关闭">×</button>
+    </div>
     <div class="field"><label>桥接与机器人状态</label>
-      <pre style="margin:0;padding:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;max-height:220px;overflow:auto;font-size:11px">${esc(healthText)}</pre>
+      <pre style="margin:0;padding:11px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;max-height:220px;overflow:auto;font-size:11px;color:var(--text-sub)">${esc(healthText)}</pre>
     </div>
     <div class="field"><label>最近事件（${eventLog.length}）</label>
-      <div style="max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:4px">
-        ${eventLog.slice(-25).reverse().map((item) => `<div class="muted" style="font-size:11px"><code>${esc(item.at)}</code> ${esc(item.name)} ${esc(JSON.stringify(item.data).slice(0, 120))}</div>`).join('') || '<div class="muted">还没有事件</div>'}
+      <div style="max-height:200px;overflow:auto;display:flex;flex-direction:column;gap:5px;padding:8px;border-radius:10px;background:rgba(0,0,0,0.16);border:1px solid var(--line-soft)">
+        ${eventLog.slice(-25).reverse().map((item) => `<div class="muted" style="font-size:11px"><code>${esc(item.at)}</code> <b>${esc(item.name)}</b> ${esc(JSON.stringify(item.data).slice(0, 120))}</div>`).join('') || '<div class="muted">还没有事件</div>'}
       </div>
     </div>
     <div class="muted">完整日志：<code>~/.gemini/memory/antigravity-remote/logs/hub.log</code></div>
     <div class="actions"><button class="primary" id="closeDiag">关闭</button></div>`;
   modal.dataset.open = 'true';
-  sheet.querySelector('#closeDiag').onclick = () => { modal.dataset.open = 'false'; };
+  sheet.querySelector('#closeDiag').onclick = closeModal;
+  sheet.querySelector('#closeDiagX').onclick = closeModal;
 };
 
 const roamBoxEl = document.getElementById('roamBox');
@@ -1019,15 +2022,18 @@ async function refreshUpdate() {
       }
     };
     bar.hidden = false;
-  } catch {
-    // 没有网络或 GitHub 不可达时静默，不打扰使用
-  }
+  } catch {}
 }
 
-refresh();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) loadModels({ force: true, silent: true });
+});
+
+loadWorkspaces();
+refresh({ refreshModels: true });
 refreshUpdate();
 setTimeout(refreshUpdate, 8000);
-setInterval(refresh, 15000);
+setInterval(() => refresh({ refreshModels: false }), 15000);
 setInterval(refreshUpdate, 30 * 60 * 1000);
 </script>
 </body>

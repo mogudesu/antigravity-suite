@@ -4,10 +4,10 @@
  * 也可从原生设置弹窗的导航入口打开。所有修改实时写回 /api/config 并热应用。
  */
 (function () {
-  if (window.__agStarlightInstalled) return;
-  window.__agStarlightInstalled = true;
-
-  const VERSION = "1.1.2";
+  const VERSION = "1.2.0";
+  if (window.__agStarlightInstalled === VERSION) return;
+  try { window.__agStarlightDispose?.(); } catch (error) {}
+  window.__agStarlightInstalled = VERSION;
   const SIDECAR = "http://127.0.0.1:" + (window.__AG_SIDECAR_PORT || 39290);
   const STYLE_ID = "ag-starlight-style";
   const WINDOW_ID = "ag-starlight-window";
@@ -27,6 +27,11 @@
     taskProgressBar: true,
     quickGoalPill: false,
     ambientClock: false,
+    rightReadingEnabled: true,
+    rightReadingBg: "#140f29",
+    rightReadingOpacity: 0.94,
+    rightReadingFontSize: 14,
+    videoPreviewEnabled: true,
     promptSticky: false,
     opacity: 0.72,
     darkTint: 0.42,
@@ -204,7 +209,10 @@
   }
 
   async function api(path, options) {
-    const response = await fetch(SIDECAR + path, Object.assign({ cache: "no-store" }, options || {}));
+    const req = Object.assign({ cache: "no-store" }, options || {});
+    const token = window.__AG_STARLIGHT_TOKEN__;
+    if (token) req.headers = Object.assign({}, req.headers || {}, { "X-Starlight-Token": token });
+    const response = await fetch(SIDECAR + path, req);
     if (!response.ok) throw new Error("HTTP " + response.status);
     return response.json();
   }
@@ -407,7 +415,7 @@
         <button type="button" class="ag-starlight-btn primary" data-starlight-update-apply ${u.available && !state.updateLoading ? "" : "hidden"}>${L("全部更新", "Update all")}</button>
       </div>
       ${u.notes ? `<div class="ag-starlight-hint">${esc(String(u.notes).slice(0, 800))}</div>` : ""}
-      <div class="ag-starlight-hint">${L("四件套统一发版：逐个校验 SHA-256、备份后替换；壁纸、提示词、记忆、录制与本地配置都会保留。更新完成后重启 Antigravity。", "Suite updates are SHA-256 verified and backed up one by one; wallpaper, prompts, memories, recordings and local config are preserved. Restart Antigravity afterwards.")}</div>
+      <div class="ag-starlight-hint">${L("五件套统一发版：前四个组件逐个校验 SHA-256、备份后替换；远程插件交给远程服务自行更新并重启。壁纸、提示词、记忆、录制与本地配置都会保留。更新完成后重启 Antigravity 刷新 MCP 工具。", "Suite updates are SHA-256 verified and backed up one by one; the remote plugin updates itself and restarts its service. Wallpaper, prompts, memories, recordings and local config are preserved. Restart Antigravity afterwards to refresh MCP tools.")}</div>
     </div>`;
   }
 
@@ -468,6 +476,10 @@
       ${row(L("空闲隐藏", "Hide when idle"), switchHtml("hideRadarWhenIdle"))}
       ${row(L("一键复制", "Quick copy"), switchHtml("quickCopyButton"), L("在右侧/主顶栏 ⋮ 旁显示复制按钮", "Copy buttons beside ⋮ in the artifact and main topbars"))}
       ${row(L("提问吸顶", "Prompt sticky"), switchHtml("promptSticky"), L("提问滚到顶部时压缩成一行", "Compact the prompt when it pins to the top"))}
+      ${row(L("右侧阅读增强", "Right reading enhance"), switchHtml("rightReadingEnabled"), L("为右侧文件与代码区提供高对比深紫阅读层并抑制星光叠加", "High-contrast deep purple backdrop & zero starlight overlay in right reading pane"))}
+      ${row(L("阅读底色", "Reading backdrop"), `<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;"><input type="color" value="${/^#[0-9a-f]{6}$/i.test(String(state.cfg.rightReadingBg || "")) ? state.cfg.rightReadingBg : "#140f29"}" data-starlight-color="rightReadingBg" style="width:24px;height:20px;padding:0;border:1px solid rgba(255,255,255,.18);border-radius:4px;background:transparent;cursor:pointer;">${sliderHtml("rightReadingOpacity", 0.5, 1, 0.01, (v) => Math.round(v * 100) + "%")}</div>`)}
+      ${row(L("代码字号", "Code font size"), sliderHtml("rightReadingFontSize", 12, 20, 1, (v) => Math.round(v) + "px"))}
+      ${row(L("视频预览", "Video preview"), switchHtml("videoPreviewEnabled"), L("在右侧面板直接流式预览本地与超大体积视频", "Stream large local videos directly inside the right pane"))}
     </div>`;
   }
 
@@ -544,11 +556,18 @@
         const value = Number(input.value);
         const val = container.querySelector(`[data-starlight-val="${key}"]`);
         if (val) {
-          if (key === "opacity" || key === "darkTint" || key === "starIntensity" || key === "meteorFrequency") val.textContent = Math.round(value * 100) + "%";
+          if (key === "opacity" || key === "darkTint" || key === "starIntensity" || key === "meteorFrequency" || key === "rightReadingOpacity") val.textContent = Math.round(value * 100) + "%";
           else if (key === "fontScale") val.textContent = Math.round(value * 100) + "%";
-          else val.textContent = Math.round(value) + (key === "blur" ? "px" : "");
+          else val.textContent = Math.round(value) + (key === "blur" || key === "rightReadingFontSize" ? "px" : "");
         }
         patchConfig({ [key]: value });
+      });
+    });
+    container.querySelectorAll("[data-starlight-color]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const key = input.getAttribute("data-starlight-color");
+        const val = String(input.value || "").trim();
+        if (/^#[0-9a-f]{6}$/i.test(val)) patchConfig({ [key]: val });
       });
     });
     container.querySelectorAll("[data-starlight-star]").forEach((button) => button.addEventListener("click", () => {
@@ -652,9 +671,11 @@
           reader.onerror = () => reject(reader.error || new Error("read failed"));
           reader.readAsDataURL(file);
         });
+        const token = window.__AG_STARLIGHT_TOKEN__;
+        const headers = Object.assign({ "Content-Type": "application/json" }, token ? { "X-Starlight-Token": token } : {});
         const response = await fetch(SIDECAR + "/api/wallpaper", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ dataUrl }),
         });
         const data = await response.json().catch(() => ({}));
@@ -871,7 +892,7 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ag-starlight-navitem";
-    button.innerHTML = `<span>✦</span><span>${L("星夜美化", "Starlight")}</span><span class="badge">v1.1</span>`;
+    button.innerHTML = `<span>✦</span><span>${L("星夜美化", "Starlight")}</span><span class="badge">v${esc(VERSION)}</span>`;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -880,7 +901,7 @@
     nav.insertBefore(button, nav.firstChild);
   }
 
-  document.addEventListener("keydown", (event) => {
+  const onKeyDown = (event) => {
     if (event.altKey && !event.ctrlKey && !event.metaKey && String(event.key).toLowerCase() === "s") {
       event.preventDefault();
       event.stopPropagation();
@@ -888,16 +909,16 @@
     } else if (event.key === "Escape" && state.open) {
       close();
     }
-  }, true);
-  document.addEventListener("ag-config-updated", (event) => {
+  };
+  const onConfigUpdated = (event) => {
     const patch = event.detail || {};
     if (patch.language || Object.keys(patch).some((key) => key in DEFAULTS)) {
       state.cfg = Object.assign({}, state.cfg, patch);
       syncLauncherLanguage();
       if (state.open || state.embeddedOpen) render();
     }
-  });
-  document.addEventListener("click", (event) => {
+  };
+  const onDocClick = (event) => {
     const target = event.target;
     const modal = document.querySelector(".settings-modal-container");
     if (modal && state.embeddedOpen && target?.closest
@@ -907,15 +928,34 @@
       closeEmbedded();
     }
     ensureSettingsNav();
-  }, true);
-  setInterval(() => {
+  };
+  document.addEventListener("keydown", onKeyDown, true);
+  document.addEventListener("ag-config-updated", onConfigUpdated);
+  document.addEventListener("click", onDocClick, true);
+  const bus = window.__agStarlightBus;
+  const starlightNavTick = () => {
     ensureLauncher();
     ensureSettingsNav();
     if (state.embeddedOpen && !document.querySelector(".settings-modal-container")) closeEmbedded();
-  }, 1500);
+  };
+  const starlightTimer = bus ? bus.onTick("starlight-settings-nav", 1500, starlightNavTick) : setInterval(starlightNavTick, 1500);
   ensureLauncher();
-  setTimeout(() => { void loadUpdate({ check: true, silent: false }); }, 4000);
-  setInterval(() => { void loadUpdate({ check: true, silent: true }); }, 6 * 60 * 60 * 1000);
+  const initialUpdateTimer = setTimeout(() => { void loadUpdate({ check: true, silent: false }); }, 4000);
+  const updatePollTimer = setInterval(() => { void loadUpdate({ check: true, silent: true }); }, 6 * 60 * 60 * 1000);
+  window.__agStarlightDispose = () => {
+    if (bus && typeof starlightTimer === "function") starlightTimer();
+    else clearInterval(starlightTimer);
+    clearTimeout(initialUpdateTimer);
+    clearInterval(updatePollTimer);
+    document.removeEventListener("keydown", onKeyDown, true);
+    document.removeEventListener("ag-config-updated", onConfigUpdated);
+    document.removeEventListener("click", onDocClick, true);
+    document.getElementById(LAUNCH_ID)?.remove();
+    document.getElementById(WINDOW_ID)?.remove();
+    document.getElementById(EMBEDDED_ID)?.remove();
+    document.getElementById(STYLE_ID)?.remove();
+    delete window.__agStarlightInstalled;
+  };
 
   window.__agStarlight = { open, close, toggle: toggleWindow, isOpen: () => state.open, openEmbedded, closeEmbedded, isEmbeddedOpen: () => state.embeddedOpen, version: VERSION };
 })();

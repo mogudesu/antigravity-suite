@@ -8,6 +8,7 @@
       "cwd": "C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity computer use-mogu",
       "env": {
         "CU_DATA_DIR": "C:\\Users\\25350\\.gemini\\memory\\computer-use",
+        "CU_AUDIT_DIR": "C:\\Users\\25350\\.gemini\\memory\\computer-use\\audit",
         "CU_POLICY_PATH": "C:\\Users\\25350\\.gemini\\memory\\computer-use\\policy.json",
         "CU_POLICY_FILE": "C:\\Users\\25350\\.gemini\\memory\\computer-use\\policy.json",
         "PYTHONUTF8": "1",

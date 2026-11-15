@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "谷谷嘎嘎正在控制你的浏览器",
-  "version": "1.7.0",
-  "description": "把本机 Edge / Chrome 交给 Antigravity 的 MCP 服务驱动（CDP + 页面动作 + RPA 录制与回放），保留登录态；内置悬浮录制胶囊与专属控制标签组。",
+  "version": "1.9.0",
+  "description": "谷谷嘎嘎把本机 Edge / Chrome 交给 MCP 服务驱动，保留登录态；控制默认在专属后台窗口的紫色标签组内运行，不抢焦点、不打扰用户；内置常驻页面鼠标与悬浮录制胶囊（RPA 录制回放）。",
   "minimum_chrome_version": "116",
   "permissions": [
     "debugger",

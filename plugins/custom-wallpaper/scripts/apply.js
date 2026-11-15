@@ -220,6 +220,25 @@ function findUsageEndpoints() {
   return ports.map((port) => `http://127.0.0.1:${port}/api/stats`);
 }
 
+function resolveRightReadingStyleVars(cfg) {
+  const safeCfg = cfg && typeof cfg === 'object' ? cfg : {};
+  const hexText = String(safeCfg.rightReadingBg || '').trim();
+  const rightReadingBgHex = /^#[0-9a-f]{6}$/i.test(hexText) ? hexText : '#140f29';
+  const rightReadingRgb = [
+    parseInt(rightReadingBgHex.slice(1, 3), 16),
+    parseInt(rightReadingBgHex.slice(3, 5), 16),
+    parseInt(rightReadingBgHex.slice(5, 7), 16)
+  ].join(', ');
+  const rightReadingAlpha = Math.max(
+    0.4,
+    Math.min(1.0, Number(safeCfg.rightReadingOpacity !== undefined ? safeCfg.rightReadingOpacity : 0.94) || 0.94)
+  ).toFixed(2);
+  const rightCodeSize = Math.round(
+    Math.max(12, Math.min(20, Number(safeCfg.rightReadingFontSize !== undefined ? safeCfg.rightReadingFontSize : 14) || 14))
+  );
+  return { rightReadingRgb, rightReadingAlpha, rightCodeSize };
+}
+
 function generateThemeCss(dataUri, cfg) {
   const opacity = cfg.opacity !== undefined ? cfg.opacity : 0.58;
   const celestialOpacity = Math.max(0.35, Math.min(0.92, Number(opacity) || 0.58));
@@ -241,6 +260,8 @@ function generateThemeCss(dataUri, cfg) {
   const focusX = Math.max(0, Math.min(100, Number(cfg.focusX !== undefined ? cfg.focusX : 50) || 0));
   const focusY = Math.max(0, Math.min(100, Number(cfg.focusY !== undefined ? cfg.focusY : 26) || 0));
 
+  const { rightReadingRgb, rightReadingAlpha, rightCodeSize } = resolveRightReadingStyleVars(cfg);
+
   return `
     /* ==========================================================================
        Antigravity Theme: Starlight Obsidian Glass (星夜流金·微晶玻璃 v2.0)
@@ -259,6 +280,10 @@ function generateThemeCss(dataUri, cfg) {
       --ag-text-muted: #64748B;
       --ag-accent-starlight: #A5B4FC;
       --ag-accent-nebula: rgba(139, 92, 246, 0.22);
+      --ag-right-reading-rgb: ${rightReadingRgb};
+      --ag-right-reading-alpha: ${rightReadingAlpha};
+      --ag-right-code-size: ${rightCodeSize}px;
+      --ag-right-code-lh: 1.6;
     }
 
     /* 1. 全局非对称星云遮罩（左深保阅读，右透保原画） */
@@ -895,7 +920,8 @@ function generateThemeCss(dataUri, cfg) {
       color: #FFFFFF !important;
     }
 
-    .surface-composer [class*="input-footer"] {
+    .surface-composer [class*="@container/input-footer"],
+    .surface-composer .agy-composer-footer {
       margin-top: 3px !important;
       padding-top: 5px !important;
       border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
@@ -922,6 +948,24 @@ function generateThemeCss(dataUri, cfg) {
     .surface-composer [data-testid="model-selector-trigger"]:hover {
       background: rgba(255, 255, 255, 0.05) !important;
       color: #F1F5F9 !important;
+    }
+
+    /* 权限预设（极速）按钮：纳入星夜金玻璃语言，避免原生灰底突兀 */
+    [data-testid="permissions-selector-trigger"] {
+      background: linear-gradient(135deg, rgba(38, 28, 68, 0.72) 0%, rgba(22, 18, 44, 0.78) 100%) !important;
+      border: 1px solid rgba(246, 216, 147, 0.28) !important;
+      color: #F6D893 !important;
+      border-radius: 9999px !important;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 248, 231, 0.10),
+        0 0 12px -6px rgba(246, 216, 147, 0.35) !important;
+      transition: background-color 160ms ease-out, color 160ms ease-out, border-color 160ms ease-out !important;
+    }
+
+    [data-testid="permissions-selector-trigger"]:hover {
+      background: linear-gradient(135deg, rgba(48, 36, 84, 0.85) 0%, rgba(30, 24, 58, 0.88) 100%) !important;
+      border-color: rgba(246, 216, 147, 0.50) !important;
+      color: #FFF6E3 !important;
     }
 
     /* 图片附件：长按拖动排序的抬升与落点反馈 */
@@ -3100,6 +3144,7 @@ function generateThemeCss(dataUri, cfg) {
     .ag-plugin-item {
       width: 100% !important;
       min-height: 48px !important;
+      flex: 0 0 auto !important;
       display: flex !important;
       align-items: flex-start !important;
       gap: 9px !important;
@@ -3197,6 +3242,76 @@ function generateThemeCss(dataUri, cfg) {
       line-height: 1 !important;
     }
 
+    .ag-plugin-head-actions {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 2px !important;
+    }
+
+    .ag-plugin-trigger:focus-visible,
+    .ag-plugin-close:focus-visible,
+    .ag-plugin-tab:focus-visible,
+    .ag-prompt-action:focus-visible,
+    .ag-mcp-btn:focus-visible,
+    .ag-panel-retry:focus-visible,
+    .ag-plugin-create:focus-visible {
+      outline: 2px solid rgba(165, 180, 252, 0.72) !important;
+      outline-offset: 2px !important;
+    }
+
+    .ag-panel-banner {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 8px !important;
+      margin: 2px 1px 6px !important;
+      padding: 7px 9px !important;
+      border: 1px solid rgba(165, 180, 252, 0.16) !important;
+      border-radius: 9px !important;
+      background: rgba(165, 180, 252, 0.08) !important;
+      color: #CBD5E1 !important;
+      font-size: 10.5px !important;
+      line-height: 1.4 !important;
+    }
+
+    .ag-panel-banner.is-error {
+      border-color: rgba(248, 113, 113, 0.34) !important;
+      background: rgba(127, 29, 29, 0.24) !important;
+      color: #FECACA !important;
+    }
+
+    .ag-panel-banner-text {
+      flex: 1 !important;
+      min-width: 0 !important;
+      word-break: break-word !important;
+    }
+
+    .ag-panel-retry {
+      flex: none !important;
+      height: 22px !important;
+      padding: 0 8px !important;
+      border: 1px solid rgba(255, 255, 255, 0.14) !important;
+      border-radius: 6px !important;
+      background: rgba(255, 255, 255, 0.08) !important;
+      color: #F8FAFC !important;
+      font-size: 10px !important;
+      cursor: pointer !important;
+    }
+
+    .ag-panel-retry:hover {
+      border-color: rgba(165, 180, 252, 0.42) !important;
+      background: rgba(165, 180, 252, 0.20) !important;
+    }
+
+    .ag-prompt-action.is-confirm {
+      width: auto !important;
+      padding: 0 6px !important;
+      background: rgba(248, 113, 113, 0.18) !important;
+      color: #FCA5A5 !important;
+      font-size: 10px !important;
+      font-weight: 600 !important;
+    }
+
     @keyframes ag-plugin-reveal {
       from { opacity: 0; transform: translateY(6px) scale(0.985); filter: blur(3px); }
       to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
@@ -3206,7 +3321,7 @@ function generateThemeCss(dataUri, cfg) {
       to { transform: rotate(360deg); }
     }
 
-    /* 18. 模型选择面板：模型 + 思考强度滑杆 */
+    /* 18. 模型选择面板：模型 + 自适应思考强度流动星光条 */
     [role="menu"]:has([data-testid="model-selector-panel"]) {
       width: 320px !important;
       min-width: 300px !important;
@@ -3214,14 +3329,36 @@ function generateThemeCss(dataUri, cfg) {
       padding: 6px !important;
     }
 
+    @keyframes agStarlightFlow {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 220% 50%; }
+    }
+
+    @keyframes agStarlightComet {
+      0% { transform: translate3d(-120%, -50%, 0); opacity: 0; }
+      18% { opacity: 0.92; }
+      82% { opacity: 0.92; }
+      100% { transform: translate3d(260%, -50%, 0); opacity: 0; }
+    }
+
+    @keyframes agStarlightPulse {
+      0%, 100% {
+        box-shadow: 0 0 6px rgba(165, 180, 252, 0.55), 0 0 12px rgba(252, 211, 77, 0.32);
+      }
+      50% {
+        box-shadow: 0 0 9px rgba(125, 211, 252, 0.78), 0 0 16px rgba(240, 171, 252, 0.45);
+      }
+    }
+
     .ag-model-effort {
       margin: 1px 1px 6px !important;
       padding: 10px 11px 9px !important;
-      border: 1px solid rgba(165, 180, 252, 0.10) !important;
+      border: 1px solid rgba(165, 180, 252, 0.14) !important;
       border-radius: 10px !important;
       background:
-        radial-gradient(120% 150% at 10% 0%, rgba(165, 180, 252, 0.10) 0%, transparent 58%),
-        rgba(255, 255, 255, 0.025) !important;
+        radial-gradient(120% 150% at 10% 0%, rgba(165, 180, 252, 0.14) 0%, transparent 58%),
+        radial-gradient(90% 130% at 92% 100%, rgba(252, 211, 77, 0.08) 0%, transparent 60%),
+        rgba(14, 16, 34, 0.48) !important;
     }
 
     .ag-effort-top {
@@ -3243,12 +3380,25 @@ function generateThemeCss(dataUri, cfg) {
       letter-spacing: 0.04em !important;
     }
 
-    .ag-effort-value {
+    .ag-effort-tier-badge {
+      padding: 1px 5px !important;
+      border-radius: 999px !important;
+      border: 1px solid rgba(165, 180, 252, 0.18) !important;
+      background: rgba(165, 180, 252, 0.08) !important;
+      color: #9FB0CA !important;
+      font-size: 9px !important;
+      line-height: 1.35 !important;
+    }
+
+    .ag-model-effort .ag-effort-value {
       margin-left: auto !important;
-      color: #C7D2FE !important;
-      font-size: 13px !important;
+      width: auto !important;
+      min-width: 24px !important;
+      color: #E0E7FF !important;
+      font-size: 12.5px !important;
       font-weight: 600 !important;
-      text-shadow: 0 0 10px rgba(165, 180, 252, 0.34) !important;
+      white-space: nowrap !important;
+      text-shadow: 0 0 10px rgba(165, 180, 252, 0.42) !important;
     }
 
     .ag-effort-model {
@@ -3285,57 +3435,77 @@ function generateThemeCss(dataUri, cfg) {
       height: 6px !important;
       margin-top: 9px !important;
       border-radius: 999px !important;
-      background: linear-gradient(
-        90deg,
-        #A5B4FC 0%,
-        #7DD3FC var(--ag-effort-fill),
-        rgba(255, 255, 255, 0.10) var(--ag-effort-fill),
-        rgba(255, 255, 255, 0.10) 100%
-      ) !important;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+      background:
+        linear-gradient(
+          90deg,
+          #818CF8 0%,
+          #38BDF8 calc(var(--ag-effort-fill) * 0.45),
+          #E9D5FF calc(var(--ag-effort-fill) * 0.8),
+          #FCD34D var(--ag-effort-fill),
+          rgba(255, 255, 255, 0.09) var(--ag-effort-fill),
+          rgba(255, 255, 255, 0.09) 100%
+        ) !important;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 0 10px rgba(165, 180, 252, 0.22) !important;
     }
 
     .ag-effort-control input[type="range"]::-webkit-slider-thumb {
-      width: 16px !important;
-      height: 16px !important;
-      margin-top: -5px !important;
+      width: 15px !important;
+      height: 15px !important;
+      margin-top: -4.5px !important;
       -webkit-appearance: none !important;
       appearance: none !important;
-      border: 1px solid rgba(255, 255, 255, 0.85) !important;
+      border: 1.5px solid rgba(255, 255, 255, 0.92) !important;
       border-radius: 50% !important;
-      background: #F8FAFC !important;
+      background: radial-gradient(circle at 35% 35%, #FFFFFF 0%, #E0E7FF 52%, #A5B4FC 100%) !important;
       box-shadow:
-        0 2px 8px rgba(0, 0, 0, 0.35),
-        0 0 0 3px rgba(165, 180, 252, 0.16) !important;
+        0 2px 8px rgba(0, 0, 0, 0.42),
+        0 0 10px rgba(165, 180, 252, 0.55),
+        0 0 0 3px rgba(165, 180, 252, 0.18) !important;
       cursor: grab !important;
     }
 
-    .ag-effort-ticks {
+    .ag-model-effort .ag-effort-ticks {
       position: absolute !important;
       left: 6px !important;
       right: 6px !important;
       top: 11px !important;
       bottom: 11px !important;
+      height: auto !important;
       display: flex !important;
       align-items: center !important;
       justify-content: space-between !important;
       pointer-events: none !important;
     }
 
-    .ag-effort-ticks i {
+    .ag-model-effort .ag-effort-ticks i {
       width: 4px !important;
       height: 4px !important;
       border-radius: 50% !important;
       background: rgba(255, 255, 255, 0.34) !important;
+      transition: background-color 160ms ease, box-shadow 160ms ease !important;
+    }
+
+    .ag-model-effort .ag-effort-ticks i[data-reached="true"] {
+      background: rgba(248, 250, 252, 0.92) !important;
+      box-shadow: 0 0 6px rgba(165, 180, 252, 0.72) !important;
     }
 
     .ag-effort-scale {
       display: flex !important;
       justify-content: space-between !important;
-      margin-top: 1px !important;
+      gap: 4px !important;
+      margin-top: 2px !important;
       padding: 0 1px !important;
       color: #6F8096 !important;
       font-size: 9px !important;
+    }
+
+    .ag-effort-scale span.is-active {
+      color: #E0E7FF !important;
+      font-weight: 600 !important;
+      text-shadow: 0 0 8px rgba(165, 180, 252, 0.45) !important;
     }
 
     .ag-model-effort.is-applying {
@@ -4563,6 +4733,15 @@ function generateThemeCss(dataUri, cfg) {
       background-image: none !important;
     }
 
+    /* Antigravity 2.30+：.agy-inset-shell 与 browser-hole 内容列默认不透明，会盖住壁纸 */
+    .agy-inset-shell,
+    .agy-inset-shell [data-main-content-body],
+    .agy-inset-shell [data-side-panel-body],
+    .agy-inset-shell .browser-hole-opaque > div {
+      background-color: transparent !important;
+      background-image: none !important;
+    }
+
     /* 性能：长对话内容不做实时 backdrop 模糊，避免滚动/动画掉帧 */
     .agy-sheet [role="article"],
     .agy-sheet [data-testid="user-input-step"],
@@ -4602,9 +4781,8 @@ function generateThemeCss(dataUri, cfg) {
       -webkit-backdrop-filter: none !important;
     }
 
-    /* 性能优先：主界面不再做实时 backdrop 模糊，改用静态渐变/半透明底 */
-    html body #root .agy-shell,
-    html body #root .agy-shell * {
+    /* 仅关闭深层普通容器的不必要模糊，保留侧栏与玻璃卡片的 --ag-glass-blur 实时效果 */
+    html body #root .agy-shell {
       backdrop-filter: none !important;
       -webkit-backdrop-filter: none !important;
     }
@@ -5371,64 +5549,66 @@ function generateThemeCss(dataUri, cfg) {
       display: none !important;
     }
 
-    /* 底栏思考强度胶囊 */
-    #ag-effort-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      width: 118px;
-      height: 24px;
-      margin-left: 4px;
-      padding: 0 7px;
-      overflow: visible;
-      border: 1px solid rgba(255, 255, 255, 0.075);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.028);
-      vertical-align: middle;
-      transition: opacity 140ms ease, border-color 140ms ease, background-color 140ms ease;
-    }
-
-    #ag-effort-pill:hover {
-      border-color: rgba(246, 216, 147, 0.22);
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    #ag-effort-pill.is-applying {
-      opacity: 0.65;
-    }
-
-    #ag-effort-pill.is-applying .ag-effort-track {
-      pointer-events: none;
-    }
-
+    /* 底栏思考强度：自适应流动星光条 */
+    #ag-effort-pill,
     .ag-effort-pill-live {
+      position: relative;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      width: 118px;
-      height: 24px;
+      width: auto;
+      min-width: 132px;
+      max-width: 196px;
+      height: 25px;
       margin-left: 4px;
-      padding: 0 7px;
-      overflow: visible;
-      border: 1px solid rgba(255, 255, 255, 0.075);
+      padding: 0 9px;
+      overflow: hidden;
+      border: 1px solid rgba(165, 180, 252, 0.20);
       border-radius: 999px;
-      background: rgba(255, 255, 255, 0.028);
+      background:
+        radial-gradient(120% 140% at 15% 0%, rgba(165, 180, 252, 0.13) 0%, transparent 55%),
+        radial-gradient(90% 120% at 90% 100%, rgba(252, 211, 77, 0.09) 0%, transparent 60%),
+        rgba(14, 16, 36, 0.56);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.10),
+        0 2px 10px rgba(4, 6, 18, 0.24);
       vertical-align: middle;
-      transition: opacity 140ms ease, border-color 140ms ease, background-color 140ms ease;
+      transition: opacity 150ms ease, border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
     }
 
+    #ag-effort-pill:hover,
     .ag-effort-pill-live:hover {
-      border-color: rgba(246, 216, 147, 0.22);
-      background: rgba(255, 255, 255, 0.04);
+      border-color: rgba(252, 211, 77, 0.34);
+      background:
+        radial-gradient(120% 140% at 15% 0%, rgba(165, 180, 252, 0.18) 0%, transparent 55%),
+        radial-gradient(90% 120% at 90% 100%, rgba(252, 211, 77, 0.14) 0%, transparent 60%),
+        rgba(18, 20, 44, 0.72);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.15),
+        0 0 14px rgba(165, 180, 252, 0.22);
     }
 
+    #ag-effort-pill.is-applying,
     .ag-effort-pill-live.is-applying {
       opacity: 0.72;
-      border-color: rgba(246, 216, 147, 0.18);
+      border-color: rgba(246, 216, 147, 0.30);
     }
 
+    #ag-effort-pill.is-applying .ag-effort-track,
     .ag-effort-pill-live.is-applying .ag-effort-track {
       pointer-events: none;
+    }
+
+    #ag-effort-pill[data-fixed="true"] {
+      min-width: 96px;
+      padding: 0 8px;
+      border-color: rgba(165, 180, 252, 0.15);
+    }
+
+    #ag-effort-pill[data-fixed="true"] .ag-effort-track {
+      min-width: 28px;
+      width: 34px;
+      cursor: default;
     }
 
     html.ag-effort-isolated #ag-effort-pill {
@@ -5437,18 +5617,20 @@ function generateThemeCss(dataUri, cfg) {
 
     .ag-effort-kicker {
       flex: 0 0 auto;
-      color: #7F8CA0;
-      font-size: 8.5px;
-      letter-spacing: 0.08em;
+      color: #93A5C0;
+      font-size: 9px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
     }
 
     .ag-effort-track {
       position: relative;
       flex: 1 1 auto;
-      min-width: 0;
-      height: 16px;
+      min-width: 68px;
+      height: 18px;
       box-sizing: border-box;
-      padding: 0 5px;
+      padding: 0 6px;
       display: flex;
       align-items: center;
       cursor: grab;
@@ -5462,98 +5644,154 @@ function generateThemeCss(dataUri, cfg) {
     }
 
     .ag-effort-track:focus-visible {
-      outline: 1px solid rgba(246, 216, 147, 0.35);
+      outline: 1px solid rgba(252, 211, 77, 0.45);
       outline-offset: 2px;
-      border-radius: 5px;
+      border-radius: 6px;
     }
 
     .ag-effort-rail {
       position: absolute;
-      left: 5px;
-      right: 5px;
+      left: 6px;
+      right: 6px;
       top: 50%;
-      height: 3px;
+      height: 4px;
       transform: translateY(-50%);
-      border-radius: 2px;
-      background: rgba(255, 255, 255, 0.10);
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(165, 180, 252, 0.14), rgba(255, 255, 255, 0.08));
+      box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.35);
       pointer-events: none;
     }
 
     .ag-effort-fill {
       position: absolute;
-      left: 5px;
+      left: 6px;
       top: 50%;
-      height: 3px;
-      width: calc(100% - 10px);
-      transform-origin: 0 50%;
-      transform: translateY(-50%) scaleX(var(--pos));
-      border-radius: 2px;
-      background: linear-gradient(90deg, rgba(246, 216, 147, 0.55) 0%, var(--ag-accent) 100%);
-      box-shadow: 0 0 6px rgba(246, 216, 147, 0.28);
+      height: 4px;
+      width: max(5px, calc((100% - 12px) * var(--pos, 0)));
+      transform: translateY(-50%);
+      border-radius: 999px;
+      overflow: hidden;
+      background: linear-gradient(
+        90deg,
+        #7DD3FC 0%,
+        #A5B4FC 24%,
+        #F0ABFC 48%,
+        #FCD34D 72%,
+        #A5B4FC 90%,
+        #7DD3FC 100%
+      );
+      background-size: 220% 100%;
+      animation: agStarlightFlow 3.4s linear infinite;
+      box-shadow:
+        0 0 8px rgba(165, 180, 252, 0.55),
+        0 0 14px rgba(252, 211, 77, 0.25);
       pointer-events: none;
+      will-change: width, background-position;
+    }
+
+    .ag-effort-fill::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 18px;
+      height: 6px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.92), transparent);
+      filter: blur(0.4px);
+      animation: agStarlightComet 2.2s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    .ag-effort-track[data-tier-ratio="low"] .ag-effort-fill {
+      opacity: 0.85;
+      box-shadow: 0 0 6px rgba(125, 211, 252, 0.45);
+    }
+
+    .ag-effort-track[data-tier-ratio="high"] .ag-effort-fill,
+    .ag-effort-track[data-tier-ratio="max"] .ag-effort-fill {
+      box-shadow:
+        0 0 10px rgba(165, 180, 252, 0.65),
+        0 0 18px rgba(252, 211, 77, 0.42);
     }
 
     .ag-effort-thumb {
       position: absolute;
-      left: 5px;
+      left: 6px;
       top: 50%;
       box-sizing: border-box;
-      width: 11px;
-      height: 11px;
-      transform: translate3d(calc(var(--pos) * var(--track-travel, 50px)), -50%, 0) scale(var(--thumb-scale, 1));
-      border: 2px solid #0d0a1c;
+      width: 12px;
+      height: 12px;
+      transform: translate3d(calc(var(--pos, 0) * var(--track-travel, 54px) - 6px), -50%, 0) scale(var(--thumb-scale, 1));
+      border: 1.5px solid rgba(255, 255, 255, 0.94);
       border-radius: 50%;
-      background: var(--ag-accent);
-      box-shadow: 0 0 6px rgba(246, 216, 147, 0.5);
+      background: radial-gradient(circle at 35% 32%, #FFFFFF 0%, #FDE68A 45%, #A5B4FC 100%);
+      animation: agStarlightPulse 2.8s ease-in-out infinite;
       pointer-events: none;
-      transition: box-shadow 140ms ease;
+      transition: transform 60ms linear;
     }
 
     .ag-effort-track:hover .ag-effort-thumb {
       --thumb-scale: 1.18;
-      box-shadow: 0 0 9px rgba(246, 216, 147, 0.65);
+      box-shadow: 0 0 12px rgba(252, 211, 77, 0.8), 0 0 18px rgba(165, 180, 252, 0.6);
     }
 
     .ag-effort-track.is-dragging .ag-effort-thumb {
       --thumb-scale: 1.3;
-      box-shadow: 0 0 10px rgba(246, 216, 147, 0.8);
+      box-shadow: 0 0 14px rgba(252, 211, 77, 0.95), 0 0 22px rgba(240, 171, 252, 0.7);
     }
 
-    .ag-effort-ticks {
+    #ag-effort-pill .ag-effort-ticks {
       position: absolute;
-      left: 5px;
-      right: 5px;
+      left: 6px;
+      right: 6px;
       bottom: 0;
-      height: 3px;
+      height: 4px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       pointer-events: none;
     }
 
-    .ag-effort-ticks i {
-      width: 2px;
-      height: 2px;
+    #ag-effort-pill .ag-effort-ticks i {
+      width: 2.5px;
+      height: 2.5px;
       border-radius: 50%;
-      background: rgba(255, 255, 255, 0.24);
-      transition: background-color 160ms ease;
+      background: rgba(255, 255, 255, 0.25);
+      transition: background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
     }
 
-    .ag-effort-track[data-level="0"] .ag-effort-ticks i:first-child,
-    .ag-effort-track[data-level="1"] .ag-effort-ticks i:nth-child(2),
-    .ag-effort-track[data-level="2"] .ag-effort-ticks i:last-child {
-      background: rgba(246, 216, 147, 0.75);
+    #ag-effort-pill .ag-effort-ticks i[data-reached="true"] {
+      background: rgba(224, 231, 255, 0.85);
+      box-shadow: 0 0 4px rgba(165, 180, 252, 0.6);
     }
 
-    .ag-effort-value {
-      flex: 0 0 12px;
-      width: 12px;
-      color: var(--ag-accent);
-      font-size: 10px;
+    #ag-effort-pill .ag-effort-ticks i[data-active="true"] {
+      background: #FDE68A;
+      transform: scale(1.35);
+      box-shadow: 0 0 6px rgba(252, 211, 77, 0.9);
+    }
+
+    #ag-effort-pill .ag-effort-value {
+      flex: 0 0 auto;
+      width: auto;
+      min-width: 18px;
+      color: #FDE68A;
+      font-size: 10.5px;
       font-weight: 600;
       text-align: right;
+      white-space: nowrap;
       font-variant-numeric: tabular-nums;
+      text-shadow: 0 0 8px rgba(252, 211, 77, 0.35);
       transition: color 160ms ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ag-effort-fill,
+      .ag-effort-fill::after,
+      .ag-effort-thumb {
+        animation: none !important;
+      }
     }
 
     /* Quest Complete 横幅 */
@@ -5652,48 +5890,204 @@ function generateThemeCss(dataUri, cfg) {
       -webkit-app-region: no-drag;
     }
 
-    [data-aux-pane-focus-scope="true"] {
+    /* v3.1 右侧阅读增强（深紫 94% 独立阅读底衬 + 边界 + 14px/1.6 代码排版，严格限定在右侧面板内） */
+    html.ag-right-reading [data-side-panel-open="true"] > [data-side-panel-focus-scope="true"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"]:not([data-side-panel-focus-scope="true"] *) {
       background:
-        radial-gradient(120% 80% at 100% 0%, rgba(139, 92, 246, 0.06) 0%, transparent 55%),
-        linear-gradient(180deg, rgba(16, 13, 32, 0.76) 0%, rgba(11, 9, 24, 0.70) 100%) !important;
-      -webkit-backdrop-filter: blur(var(--ag-glass-blur, 24px)) saturate(155%);
-      backdrop-filter: blur(var(--ag-glass-blur, 24px)) saturate(155%);
+        radial-gradient(120% 75% at 100% 0%, rgba(139, 92, 246, 0.09) 0%, transparent 56%),
+        rgba(var(--ag-right-reading-rgb, 20, 15, 41), var(--ag-right-reading-alpha, 0.94)) !important;
+      -webkit-backdrop-filter: blur(var(--ag-glass-blur, 24px)) saturate(145%);
+      backdrop-filter: blur(var(--ag-glass-blur, 24px)) saturate(145%);
+      border-left: 1px solid rgba(196, 181, 253, 0.18) !important;
+      box-shadow: -10px 0 32px rgba(4, 2, 14, 0.34) !important;
     }
 
-    [data-aux-pane-focus-scope="true"] .bg-background,
-    [data-aux-pane-focus-scope="true"] [data-testid="artifact-view"] {
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [data-side-panel-focus-scope="true"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .bg-background,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [data-testid="artifact-view"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [aria-label="File Viewer"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .bg-background,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [data-testid="artifact-view"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [aria-label="File Viewer"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root {
       background: transparent !important;
     }
 
-    [data-active-tab-id] {
-      border-color: rgba(255, 255, 255, 0.06) !important;
-      background: linear-gradient(180deg, rgba(22, 18, 40, 0.66) 0%, rgba(14, 11, 28, 0.50) 100%) !important;
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [data-testid="tab-file-tree-sidebar"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [data-testid="tab-file-tree-sidebar"] {
+      background:
+        linear-gradient(180deg, rgba(8, 5, 20, 0.30) 0%, rgba(5, 3, 14, 0.42) 100%),
+        rgba(var(--ag-right-reading-rgb, 20, 15, 41), var(--ag-right-reading-alpha, 0.94)) !important;
+      border-left: 1px solid rgba(196, 181, 253, 0.16) !important;
     }
 
-    [data-active-tab-id] button[data-tab-id] {
-      border-radius: 8px 8px 0 0 !important;
-      color: #9DA9BC !important;
+    html.ag-right-reading [data-testid="tab-file-tree-sidebar"] [role="treeitem"] {
+      color: #C2BCE0 !important;
+    }
+
+    html.ag-right-reading [data-testid="tab-file-tree-sidebar"] [role="treeitem"]:hover {
+      color: #F8F6FF !important;
+      background: rgba(196, 181, 253, 0.12) !important;
+    }
+
+    html.ag-right-reading [data-testid="tab-file-tree-sidebar"] [role="treeitem"][aria-selected="true"] {
+      color: #FFF4D2 !important;
+      background: rgba(139, 92, 246, 0.28) !important;
+      box-shadow: inset 2px 0 0 #F6D893 !important;
+    }
+
+    html.ag-right-reading [data-side-panel-strip="true"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [data-active-tab-id],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [data-active-tab-id] {
+      border-bottom: 1px solid rgba(196, 181, 253, 0.20) !important;
+      background:
+        linear-gradient(180deg, rgba(10, 7, 24, 0.24) 0%, rgba(8, 5, 20, 0.16) 100%),
+        rgba(var(--ag-right-reading-rgb, 20, 15, 41), var(--ag-right-reading-alpha, 0.94)) !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .agy-aux-tab,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .agy-aux-tab {
+      border: 1px solid rgba(196, 181, 253, 0.10) !important;
+      border-radius: 7px !important;
+      transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease !important;
+    }
+
+    html.ag-right-reading [data-side-panel-strip="true"] button[data-tab-id],
+    html.ag-right-reading [data-active-tab-id] button[data-tab-id] {
+      border-radius: 7px !important;
+      color: #B4BDCE !important;
       transition: color 150ms ease, background-color 150ms ease !important;
     }
 
-    [data-active-tab-id] button[data-tab-id]:hover {
-      color: #E9EFF8 !important;
-      background: rgba(255, 255, 255, 0.035) !important;
+    html.ag-right-reading [data-side-panel-strip="true"] button[data-tab-id]:hover,
+    html.ag-right-reading [data-active-tab-id] button[data-tab-id]:hover {
+      color: #F4F7FC !important;
+      background: rgba(196, 181, 253, 0.08) !important;
     }
 
-    [data-active-tab-id] button[data-tab-id][aria-selected="true"],
-    [data-active-tab-id] button[data-tab-id].is-active,
-    [data-active-tab-id] button[data-tab-id][data-active="true"] {
-      color: #F6EBD8 !important;
-      background: linear-gradient(180deg, rgba(246, 216, 147, 0.10) 0%, rgba(246, 216, 147, 0.02) 100%) !important;
-      box-shadow: inset 0 1px 0 rgba(246, 216, 147, 0.22) !important;
+    html.ag-right-reading .agy-aux-tab.bg-secondary,
+    html.ag-right-reading .agy-aux-tab:has(button[aria-selected="true"]),
+    html.ag-right-reading .agy-aux-tab:has(button.is-active),
+    html.ag-right-reading .agy-aux-tab:has(button[data-active="true"]) {
+      border-color: rgba(246, 216, 147, 0.30) !important;
+      background: linear-gradient(180deg, rgba(139, 92, 246, 0.24) 0%, rgba(246, 216, 147, 0.08) 100%) !important;
+      box-shadow: inset 0 1px 0 rgba(246, 216, 147, 0.32), 0 1px 4px rgba(0, 0, 0, 0.22) !important;
     }
 
-    [class*="group/file-row"] {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.045) !important;
-      background: rgba(12, 14, 26, 0.22) !important;
+    html.ag-right-reading .agy-aux-tab.bg-secondary button[data-tab-id],
+    html.ag-right-reading [data-active-tab-id] button[data-tab-id][aria-selected="true"],
+    html.ag-right-reading [data-active-tab-id] button[data-tab-id].is-active,
+    html.ag-right-reading [data-active-tab-id] button[data-tab-id][data-active="true"] {
+      color: #FFF3D6 !important;
+      background: transparent !important;
     }
 
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [aria-label="File Viewer header"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [class*="group/file-row"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [aria-label="File Viewer header"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [class*="group/file-row"] {
+      border-top: 1px solid rgba(255, 255, 255, 0.03) !important;
+      border-bottom: 1px solid rgba(196, 181, 253, 0.16) !important;
+      background:
+        linear-gradient(180deg, rgba(10, 7, 24, 0.22) 0%, rgba(8, 5, 19, 0.18) 100%),
+        rgba(var(--ag-right-reading-rgb, 20, 15, 41), var(--ag-right-reading-alpha, 0.94)) !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] nav[aria-label="File path breadcrumbs"] button,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] nav[aria-label="File path breadcrumbs"] button {
+      color: #D2CCE8 !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] nav[aria-label="File path breadcrumbs"] button:hover,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] nav[aria-label="File path breadcrumbs"] button:hover {
+      color: #FFFFFF !important;
+    }
+
+    /* 代码正文、行号、选区、搜索命中：默认 14px 等宽字体 + 1.6 倍行高，保留语法高亮 */
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root {
+      color: #EEEAFF;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root .code-line,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root .code-line {
+      font-family: "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, "等距更紗黑體 TC", monospace !important;
+      font-size: var(--ag-right-code-size, 14px) !important;
+      line-height: 1.6 !important;
+      min-height: calc(var(--ag-right-code-size, 14px) * 1.6) !important;
+      align-items: baseline !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root .line-content,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root .line-content,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root [data-testid="code-gutter"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root [data-testid="code-gutter"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .view-lines,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .view-lines,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .margin-view-overlays .line-numbers,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .margin-view-overlays .line-numbers {
+      font-family: "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, "等距更紗黑體 TC", monospace !important;
+      font-size: var(--ag-right-code-size, 14px) !important;
+      line-height: 1.6 !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root .line-content span,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root .line-content span {
+      font-size: inherit !important;
+      line-height: inherit !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root [data-testid="code-gutter"],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root [data-testid="code-gutter"],
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .margin-view-overlays .line-numbers,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .margin-view-overlays .line-numbers {
+      color: #9C93C9 !important;
+      padding-right: 12px !important;
+      border-right: 1px solid rgba(196, 181, 253, 0.11) !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root .code-line:hover,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root .code-line:hover {
+      background: rgba(196, 181, 253, 0.065) !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor-background,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .margin,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor-background,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .margin {
+      background: transparent !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root ::selection,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root ::selection,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .selected-text,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .selected-text {
+      background: rgba(139, 92, 246, 0.46) !important;
+      color: #FFFFFF !important;
+    }
+
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root .findMatch,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .file-viewer-root .currentFindMatch,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .findMatch,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .monaco-editor .currentFindMatch,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] mark,
+    html.ag-right-reading [data-side-panel-focus-scope="true"] [data-search-match],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root .findMatch,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .file-viewer-root .currentFindMatch,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .findMatch,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .monaco-editor .currentFindMatch,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] [data-search-match],
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] mark {
+      background: rgba(246, 216, 147, 0.34) !important;
+      color: #FFF8E7 !important;
+      outline: 1px solid rgba(246, 216, 147, 0.80) !important;
+      border-radius: 2px;
+    }
+
+    [data-side-panel-focus-scope="true"] [data-testid="more-actions-overflow"],
     [data-aux-pane-focus-scope="true"] [data-testid="more-actions-overflow"],
     .ag-quick-copy-btn,
     .ag-quick-copy-chat {
@@ -5789,8 +6183,281 @@ function generateThemeCss(dataUri, cfg) {
       background: rgba(246, 216, 147, 0.035) !important;
     }
 
-    [data-aux-pane-focus-scope="true"] .bg-muted {
+    html.ag-right-reading [data-side-panel-focus-scope="true"] .bg-muted,
+    html.ag-right-reading [data-aux-pane-focus-scope="true"] .bg-muted {
+      background: rgba(196, 181, 253, 0.07) !important;
+    }
+
+    /* 24. MCP 连接面板 */
+    .ag-mcp-panel {
+      width: min(430px, 100%) !important;
+    }
+
+    .ag-mcp-bar {
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      margin: 0 1px 6px !important;
+      padding: 6px 8px !important;
+      border: 1px solid rgba(165, 180, 252, 0.10) !important;
+      border-radius: 9px !important;
+      background:
+        radial-gradient(120% 150% at 10% 0%, rgba(165, 180, 252, 0.10) 0%, transparent 60%),
+        rgba(255, 255, 255, 0.025) !important;
+    }
+
+    .ag-mcp-bar-text {
+      flex: 1 !important;
+      min-width: 0 !important;
+      color: #91A2B9 !important;
+      font-size: 10px !important;
+      line-height: 1.4 !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+
+    .ag-mcp-btn {
+      flex: none !important;
+      height: 22px !important;
+      padding: 0 8px !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      border-radius: 6px !important;
       background: rgba(255, 255, 255, 0.045) !important;
+      color: #AAB8CC !important;
+      font-size: 10px !important;
+      cursor: pointer !important;
+      transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease !important;
+    }
+
+    .ag-mcp-btn:hover {
+      border-color: rgba(165, 180, 252, 0.28) !important;
+      background: rgba(165, 180, 252, 0.12) !important;
+      color: #E0E7FF !important;
+    }
+
+    .ag-mcp-btn[disabled] {
+      opacity: 0.5 !important;
+      cursor: default !important;
+    }
+
+    .ag-mcp-btn.primary {
+      border-color: rgba(165, 180, 252, 0.24) !important;
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.28), rgba(56, 189, 248, 0.16)) !important;
+      color: #E8EDF6 !important;
+    }
+
+    .ag-mcp-btn.is-spin {
+      color: #A5B4FC !important;
+      animation: ag-mcp-pulse 900ms ease-in-out infinite !important;
+    }
+
+    @keyframes ag-mcp-pulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+
+    .ag-mcp-entry {
+      flex: 0 0 auto !important;
+      display: flex !important;
+      flex-direction: column !important;
+      border-radius: 9px !important;
+    }
+
+    .ag-mcp-entry.is-off .ag-mcp-item {
+      opacity: 0.55 !important;
+    }
+
+    .ag-mcp-item {
+      border-radius: 9px 9px 0 0 !important;
+    }
+
+    .ag-mcp-entry:not(.is-open) .ag-mcp-item {
+      border-radius: 9px !important;
+    }
+
+    .ag-mcp-actions {
+      flex: none !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      padding-top: 4px !important;
+    }
+
+    .ag-mcp-state {
+      margin-left: 5px !important;
+      color: #7F90A6 !important;
+      font-size: 9.5px !important;
+      font-weight: 400 !important;
+    }
+
+    .ag-mcp-dot {
+      flex: none !important;
+      width: 6px !important;
+      height: 6px !important;
+      margin-left: 6px !important;
+      border-radius: 999px !important;
+      background: #94A3B8 !important;
+      box-shadow: 0 0 8px -1px currentColor !important;
+      color: #94A3B8 !important;
+    }
+
+    .ag-mcp-dot.is-ready { background: #6EE7B7 !important; color: #6EE7B7 !important; }
+    .ag-mcp-dot.is-pending { background: #7DD3FC !important; color: #7DD3FC !important; }
+    .ag-mcp-dot.is-error { background: #FCA5A5 !important; color: #FCA5A5 !important; }
+    .ag-mcp-dot.is-disabled { background: #94A3B8 !important; color: #94A3B8 !important; }
+    .ag-mcp-dot.is-idle { background: #C4B5FD !important; color: #C4B5FD !important; }
+
+    .ag-mcp-detail {
+      display: none !important;
+      flex-direction: column !important;
+      gap: 6px !important;
+      margin: 0 8px 8px !important;
+      padding: 8px 9px 9px !important;
+      border: 1px solid rgba(165, 180, 252, 0.10) !important;
+      border-top: 0 !important;
+      border-radius: 0 0 9px 9px !important;
+      background: rgba(255, 255, 255, 0.022) !important;
+    }
+
+    .ag-mcp-entry.is-open .ag-mcp-detail {
+      display: flex !important;
+    }
+
+    .ag-mcp-lines {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 3px !important;
+    }
+
+    .ag-mcp-line {
+      display: flex !important;
+      align-items: baseline !important;
+      gap: 7px !important;
+    }
+
+    .ag-mcp-key {
+      flex: none !important;
+      width: 52px !important;
+      color: #66788F !important;
+      font-size: 9.5px !important;
+      letter-spacing: 0.04em !important;
+    }
+
+    .ag-mcp-val {
+      min-width: 0 !important;
+      color: #AEBCCF !important;
+      font-size: 10px !important;
+      line-height: 1.45 !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+
+    .ag-mcp-val.is-mono {
+      font-family: var(--ag-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace) !important;
+      font-size: 9.5px !important;
+      color: #93A5BC !important;
+    }
+
+    .ag-mcp-error {
+      padding: 6px 8px !important;
+      border: 1px solid rgba(252, 165, 165, 0.22) !important;
+      border-radius: 7px !important;
+      background: rgba(252, 165, 165, 0.07) !important;
+      color: #F3C4C4 !important;
+      font-size: 10px !important;
+      line-height: 1.5 !important;
+      white-space: pre-wrap !important;
+      word-break: break-word !important;
+    }
+
+    .ag-mcp-warn,
+    .ag-mcp-hint {
+      color: #C4A88A !important;
+      font-size: 9.5px !important;
+      line-height: 1.5 !important;
+    }
+
+    .ag-mcp-hint {
+      color: #7F90A6 !important;
+    }
+
+    .ag-mcp-notes {
+      color: #8D9EB4 !important;
+      font-size: 10px !important;
+      line-height: 1.55 !important;
+      max-height: 62px !important;
+      overflow-y: auto !important;
+    }
+
+    .ag-mcp-tools {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 1px !important;
+      max-height: 148px !important;
+      min-height: 0 !important;
+      overflow-y: auto !important;
+      padding-top: 2px !important;
+      border-top: 1px solid rgba(165, 180, 252, 0.08) !important;
+    }
+
+    .ag-mcp-tool {
+      flex: none !important;
+      display: flex !important;
+      align-items: baseline !important;
+      gap: 7px !important;
+      padding: 4px 6px !important;
+      border-radius: 6px !important;
+      cursor: pointer !important;
+      transition: background-color 130ms ease !important;
+    }
+
+    .ag-mcp-tool:hover,
+    .ag-mcp-tool:focus-visible {
+      background: rgba(165, 180, 252, 0.10) !important;
+      outline: none !important;
+    }
+
+    .ag-mcp-tool-name {
+      flex: none !important;
+      max-width: 148px !important;
+      color: #C7D2FE !important;
+      font-family: var(--ag-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace) !important;
+      font-size: 9.5px !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+
+    .ag-mcp-tool-desc {
+      flex: 1 !important;
+      min-width: 0 !important;
+      color: #7C8DA3 !important;
+      font-size: 9.5px !important;
+      line-height: 1.45 !important;
+      display: -webkit-box !important;
+      overflow: hidden !important;
+      -webkit-line-clamp: 2 !important;
+      -webkit-box-orient: vertical !important;
+    }
+
+    .ag-mcp-tool.is-off .ag-mcp-tool-name,
+    .ag-mcp-tool.is-off .ag-mcp-tool-desc {
+      opacity: 0.55 !important;
+    }
+
+    .ag-mcp-tool-flag {
+      flex: none !important;
+      padding: 1px 5px !important;
+      border-radius: 999px !important;
+      background: rgba(148, 163, 184, 0.12) !important;
+      color: #91A2B9 !important;
+      font-size: 9px !important;
+    }
+
+    .ag-mcp-footer {
+      margin-top: 4px !important;
     }
   `;
 }
@@ -5824,6 +6491,21 @@ function applyWallpaper(options = {}) {
     : path.join(pluginDir, cfg.wallpaperPath);
 
   if (!fs.existsSync(fullImgPath)) {
+    const assetsDir = path.join(pluginDir, 'assets');
+    for (const extCandidate of ['webp', 'png', 'jpg', 'jpeg']) {
+      const customPath = path.join(assetsDir, `custom-wallpaper.${extCandidate}`);
+      if (fs.existsSync(customPath)) {
+        fullImgPath = customPath;
+        break;
+      }
+    }
+    if (!fs.existsSync(fullImgPath)) {
+      const defaultPath = path.join(assetsDir, 'wallpaper.jpg');
+      if (fs.existsSync(defaultPath)) fullImgPath = defaultPath;
+    }
+  }
+
+  if (!fs.existsSync(fullImgPath)) {
     console.error('[Wallpaper] Wallpaper image not found:', fullImgPath);
     return;
   }
@@ -5842,6 +6524,10 @@ function applyWallpaper(options = {}) {
   try {
     const runtime = JSON.parse(fs.readFileSync(path.join(pluginDir, 'config', 'runtime.json'), 'utf8'));
     if (Number.isInteger(runtime.port) && runtime.port > 0) sidecarPort = runtime.port;
+  } catch (error) {}
+  let sidecarToken = '';
+  try {
+    sidecarToken = fs.readFileSync(path.join(pluginDir, 'config', '.sidecar-token'), 'utf8').trim();
   } catch (error) {}
   let defaultPrompts = [];
   try {
@@ -5865,7 +6551,7 @@ function applyWallpaper(options = {}) {
   } catch (error) {
     console.warn('[Wallpaper] Failed to read memory-page.js:', error.message);
   }
-  for (const extraName of ['i18n-engine.js', 'running-radar.js', 'quick-copy.js', 'telemetry-panels.js', 'resource-actions.js', 'starlight-settings.js']) {
+  for (const extraName of ['i18n-engine.js', 'running-radar.js', 'quick-copy.js', 'telemetry-panels.js', 'resource-actions.js', 'starlight-settings.js', 'media-preview.js']) {
     const extraPath = path.join(__dirname, extraName);
     try {
       if (fs.existsSync(extraPath)) extraScripts += '\n;\n' + fs.readFileSync(extraPath, 'utf8');
@@ -5873,6 +6559,68 @@ function applyWallpaper(options = {}) {
       console.warn('[Wallpaper] Failed to read ' + extraName + ':', error.message);
     }
   }
+
+  const starlightBusSource = `
+(function(){
+  if (window.__agStarlightBus && window.__agStarlightBus.version === 1) return;
+  const mutSubs = new Map();
+  const tickSubs = new Map();
+  let mutTimer = 0;
+  let lastTickMap = new Map();
+  const dispatchMut = (mutations) => {
+    for (const [, entry] of mutSubs) {
+      try {
+        if (entry.filter && !mutations.some((m) => !entry.filter(m))) continue;
+        entry.fn(mutations);
+      } catch (e) {}
+    }
+  };
+  const mo = new MutationObserver((mutations) => {
+    if (document.hidden) return;
+    if (mutTimer) return;
+    mutTimer = window.setTimeout(() => {
+      mutTimer = 0;
+      dispatchMut(mutations);
+    }, 200);
+  });
+  if (document.documentElement) {
+    mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  }
+  const tickTimer = window.setInterval(() => {
+    if (document.hidden) return;
+    const now = Date.now();
+    for (const [key, entry] of tickSubs) {
+      const prev = lastTickMap.get(key) || 0;
+      if (now - prev >= entry.ms) {
+        lastTickMap.set(key, now);
+        try { entry.fn(); } catch (e) {}
+      }
+    }
+  }, 500);
+  window.__agStarlightBus = {
+    version: 1,
+    onMutation(key, fn, filter) {
+      mutSubs.set(key, { fn, filter });
+      return () => mutSubs.delete(key);
+    },
+    onTick(key, ms, fn) {
+      tickSubs.set(key, { ms: Math.max(250, Number(ms) || 1000), fn });
+      lastTickMap.set(key, 0);
+      return () => { tickSubs.delete(key); lastTickMap.delete(key); };
+    },
+    dispose() {
+      if (mutTimer) clearTimeout(mutTimer);
+      mutTimer = 0;
+      clearInterval(tickTimer);
+      mo.disconnect();
+      mutSubs.clear();
+      tickSubs.clear();
+      lastTickMap.clear();
+      delete window.__agStarlightBus;
+    }
+  };
+})();
+`;
 
   const applyConfigSource = `
 window.__agApplyConfig = function (patch) {
@@ -5918,7 +6666,34 @@ window.__agApplyConfig = function (patch) {
     document.documentElement.lang = p.language;
     try { window.__agI18n?.setLanguage?.(p.language); } catch (error) {}
   }
-  if (p.cursorParticles === false) document.getElementById('antigravity-cursor-particles')?.remove();
+  if (typeof p.deepI18n === 'boolean' || typeof p.translateAlerts === 'boolean') {
+    try { window.__agI18n?.applyConfig?.(p); } catch (error) {}
+  }
+  if (typeof p.cursorParticles === 'boolean') {
+    if (typeof window.__agSyncCursorParticles === 'function') {
+      window.__agSyncCursorParticles(p.cursorParticles);
+    } else if (p.cursorParticles === false) {
+      document.getElementById('antigravity-cursor-particles')?.remove();
+    }
+  }
+  if (typeof p.rightReadingEnabled === 'boolean') {
+    document.documentElement.classList.toggle('ag-right-reading', p.rightReadingEnabled !== false);
+    try { window.__agUpdateReadingMask?.(); } catch (error) {}
+  }
+  if (typeof p.rightReadingBg === 'string' && /^#[0-9a-f]{6}$/i.test(p.rightReadingBg.trim())) {
+    const hexBg = p.rightReadingBg.trim().slice(1);
+    const rgbBg = parseInt(hexBg.slice(0, 2), 16) + ', ' + parseInt(hexBg.slice(2, 4), 16) + ', ' + parseInt(hexBg.slice(4, 6), 16);
+    style.setProperty('--ag-right-reading-rgb', rgbBg);
+  }
+  if (isNum(p.rightReadingOpacity)) {
+    style.setProperty('--ag-right-reading-alpha', String(clamp(p.rightReadingOpacity, 0.4, 1)));
+  }
+  if (isNum(p.rightReadingFontSize)) {
+    style.setProperty('--ag-right-code-size', Math.round(clamp(p.rightReadingFontSize, 12, 20)) + 'px');
+  }
+  if (typeof p.videoPreviewEnabled === 'boolean') {
+    document.documentElement.classList.toggle('ag-video-preview-disabled', !p.videoPreviewEnabled);
+  }
   document.dispatchEvent(new CustomEvent('ag-config-updated', { detail: p }));
   return window.__AG_CONFIG;
 };
@@ -5936,11 +6711,15 @@ window.__agApplyConfig = function (patch) {
         return;
       }
 
-      const pages = targets.filter(x => x.type === 'page');
+      const isMainIdePage = (target) => {
+      if (!target || target.type !== 'page') return false;
+      const u = String(target.url || '');
+      if (!/^https:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(u)) return false;
+      if (/sidecar|devtools|chrome-extension:|plugin:/i.test(u)) return false;
+      return true;
+    };
+    const pages = targets.filter(isMainIdePage);
       pages.forEach((page) => {
-        const ws = new WebSocket(page.webSocketDebuggerUrl);
-        let enhanceSent = false;
-        ws.onopen = () => {
           const code = `
             (() => {
               let layer = document.getElementById('antigravity-custom-bg-layer');
@@ -5960,13 +6739,17 @@ window.__agApplyConfig = function (patch) {
               const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
               function installCursorParticles() {
-                if (reduceMotion.matches) {
-                  const existing = document.getElementById('antigravity-cursor-particles');
-                  if (existing) existing.remove();
+                const enabled = window.__AG_CONFIG?.cursorParticles !== false && !reduceMotion.matches;
+                if (!enabled) {
+                  try { window.__agCursorParticlesDestroy?.(); } catch (error) {}
+                  document.getElementById('antigravity-cursor-particles')?.remove();
                   return 'disabled';
                 }
 
                 let canvas = document.getElementById('antigravity-cursor-particles');
+                if (canvas && canvas.dataset.agReady === '1' && typeof window.__agCursorParticlesDestroy === 'function') {
+                  return 'ready';
+                }
                 if (!canvas) {
                   canvas = document.createElement('canvas');
                   canvas.id = 'antigravity-cursor-particles';
@@ -5983,7 +6766,6 @@ window.__agApplyConfig = function (patch) {
                   document.body.appendChild(canvas);
                 }
 
-                if (canvas.dataset.agReady === '1') return 'ready';
                 canvas.dataset.agReady = '1';
 
                 const ctx = canvas.getContext('2d');
@@ -5999,6 +6781,7 @@ window.__agApplyConfig = function (patch) {
                 let pointerX = -100;
                 let pointerY = -100;
                 let pointerAt = 0;
+                let destroyed = false;
 
                 function resize() {
                   dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -6013,6 +6796,7 @@ window.__agApplyConfig = function (patch) {
                 window.addEventListener('resize', resize, { passive: true });
 
                 function spawn(x, y, count) {
+                  if (destroyed || document.hidden) return;
                   const now = performance.now();
                   for (let i = 0; i < count; i += 1) {
                     particles.push({
@@ -6050,6 +6834,7 @@ window.__agApplyConfig = function (patch) {
                 }
 
                 function draw(now) {
+                  if (destroyed) return;
                   ctx.clearRect(0, 0, viewportW, viewportH);
 
                   if (now - pointerAt < 260 && pointerX > 0 && pointerY > 0) {
@@ -6089,7 +6874,7 @@ window.__agApplyConfig = function (patch) {
                   }
                   ctx.globalCompositeOperation = 'source-over';
 
-                  if (particles.length > 0) {
+                  if (particles.length > 0 && !document.hidden) {
                     rafId = requestAnimationFrame(draw);
                   } else {
                     rafId = 0;
@@ -6097,24 +6882,62 @@ window.__agApplyConfig = function (patch) {
                   }
                 }
 
-                window.addEventListener('pointermove', (event) => {
+                const isPointInRightReadingZone = (x, y, target) => {
+                  if (!document.documentElement.classList.contains('ag-right-reading')) return false;
+                  if (target && target.closest?.('[data-side-panel-focus-scope="true"], [data-aux-pane-focus-scope="true"]')) return true;
+                  const rect = window.__agRightReadingRect;
+                  return Boolean(rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom);
+                };
+
+                const onPointerMove = (event) => {
+                  if (isPointInRightReadingZone(event.clientX, event.clientY, event.target)) {
+                    pointerX = -100;
+                    pointerY = -100;
+                    return;
+                  }
                   pointerX = event.clientX;
                   pointerY = event.clientY;
                   pointerAt = performance.now();
                   if (pointerAt - lastMoveAt < 20) return;
                   lastMoveAt = pointerAt;
                   spawn(event.clientX, event.clientY, 2);
-                }, { passive: true });
+                };
 
-                window.addEventListener('pointerdown', (event) => {
+                const onPointerDown = (event) => {
+                  if (isPointInRightReadingZone(event.clientX, event.clientY, event.target)) return;
                   pointerX = event.clientX;
                   pointerY = event.clientY;
                   pointerAt = performance.now();
                   spawn(event.clientX, event.clientY, 8);
-                }, { passive: true });
+                };
+
+                window.addEventListener('pointermove', onPointerMove, { passive: true });
+                window.addEventListener('pointerdown', onPointerDown, { passive: true });
+
+                window.__agCursorParticlesDestroy = function () {
+                  destroyed = true;
+                  if (rafId) cancelAnimationFrame(rafId);
+                  rafId = 0;
+                  particles = [];
+                  window.removeEventListener('resize', resize);
+                  window.removeEventListener('pointermove', onPointerMove);
+                  window.removeEventListener('pointerdown', onPointerDown);
+                  canvas.remove();
+                  delete window.__agCursorParticlesDestroy;
+                };
 
                 return 'ready';
               }
+
+              window.__agSyncCursorParticles = function (flag) {
+                window.__AG_CONFIG = Object.assign({}, window.__AG_CONFIG || {}, { cursorParticles: flag !== false });
+                if (flag === false) {
+                  try { window.__agCursorParticlesDestroy?.(); } catch (error) {}
+                  document.getElementById('antigravity-cursor-particles')?.remove();
+                  return 'disabled';
+                }
+                return installCursorParticles();
+              };
 
               function installSectionHints() {
                 document.querySelectorAll('.bg-sidebar h2 > button[aria-expanded]').forEach((button) => {
@@ -6389,64 +7212,203 @@ window.__agApplyConfig = function (patch) {
             })()
           `;
 
-          ws.send(JSON.stringify({
-            id: 1,
-            method: 'Runtime.evaluate',
-            params: { expression: code, returnByValue: true }
-          }));
-        };
+          const buildUiPayloadExpression = () => {
+            const { rightReadingRgb, rightReadingAlpha, rightCodeSize } = resolveRightReadingStyleVars(cfg);
+            return (
+            'window.__AG_INSTALLED_PLUGINS = ' + JSON.stringify(pluginCatalog) + ';\n' +
+            'window.__AG_USAGE_ENDPOINTS = ' + JSON.stringify(usageEndpoints) + ';\n' +
+            'window.__AG_SKILL_PATHS = ' + JSON.stringify(skillPathMap) + ';\n' +
+            'window.__AG_SKILLS = ' + JSON.stringify(skillCatalog) + ';\n' +
+            'window.__AG_DEFAULT_PROMPTS = ' + JSON.stringify(defaultPrompts) + ';\n' +
+            'window.__AG_SIDECAR_PORT = ' + JSON.stringify(sidecarPort) + ';\n' +
+            'window.__AG_STARLIGHT_TOKEN__ = ' + JSON.stringify(sidecarToken) + ';\n' +
+            'window.__AG_CONFIG = Object.assign({}, window.__AG_CONFIG || {}, ' + JSON.stringify(cfg) + ');\n' +
+            'window.__AG_CONFIG__ = window.__AG_CONFIG;\n' +
+            'document.documentElement.lang = ' + JSON.stringify(cfg.language || 'zh-CN') + ';\n' +
+            starlightBusSource + '\n' +
+            applyConfigSource +
+            'document.documentElement.classList.toggle("ag-prompt-sticky", ' + JSON.stringify(cfg.promptSticky === true) + ');\n' +
+            'document.documentElement.classList.toggle("ag-right-reading", ' + JSON.stringify(cfg.rightReadingEnabled !== false) + ');\n' +
+            'document.documentElement.classList.toggle("ag-video-preview-disabled", ' + JSON.stringify(cfg.videoPreviewEnabled === false) + ');\n' +
+            'document.documentElement.dataset.agFont = ' + JSON.stringify(cfg.fontPreset || 'editorial-luxe') + ';\n' +
+            'document.documentElement.style.setProperty("--ag-font-scale", String(' + JSON.stringify(Number(cfg.fontScale) || 1) + '));\n' +
+            'document.documentElement.style.setProperty("--ag-right-reading-rgb", ' + JSON.stringify(rightReadingRgb) + ');\n' +
+            'document.documentElement.style.setProperty("--ag-right-reading-alpha", ' + JSON.stringify(rightReadingAlpha) + ');\n' +
+            'document.documentElement.style.setProperty("--ag-right-code-size", ' + JSON.stringify(rightCodeSize + 'px') + ');\n' +
+            'window.__AG_STAR_CONFIG = ' + JSON.stringify({
+              mode: cfg.starEffectMode || 'orbit-meteor',
+              intensity: Number.isFinite(Number(cfg.starIntensity)) ? Number(cfg.starIntensity) : 0.85,
+              frequency: Number.isFinite(Number(cfg.meteorFrequency)) ? Number(cfg.meteorFrequency) : 0.6
+            }) + ';\n' +
+            'if (typeof window.__agUpdatePromptSticky === "function") window.__agUpdatePromptSticky();\n' +
+            enhanceScript + '\n;\n' + memoryScript + extraScripts +
+            '\n;(function(){try{if(window.__agI18n&&window.__AG_CONFIG)window.__agI18n.setLanguage(window.__AG_CONFIG.language||"zh-CN");}catch(e){}})();\n'
+            );
+          };
 
-        ws.onmessage = (msg) => {
-          let response = null;
-          try {
-            response = JSON.parse(msg.data);
-          } catch (error) {}
+          function connectCdp(wsUrl) {
+            return new Promise((resolve, reject) => {
+              const ws = new WebSocket(wsUrl);
+              let nextId = 1;
+              const pending = new Map();
+              const eventWaiters = new Map();
 
-          if (!enhanceSent && (enhanceScript || memoryScript || extraScripts)) {
-            enhanceSent = true;
-            if (response?.result?.exceptionDetails) {
-              console.error('[Wallpaper] Theme injection error:', response.result.exceptionDetails.text);
+              const timer = setTimeout(() => {
+                try { ws.close(); } catch {}
+                reject(new Error('DevTools WebSocket open timeout'));
+              }, 8000);
+
+              ws.onopen = () => {
+                clearTimeout(timer);
+                resolve({
+                  rpc(method, params, timeoutMs = 10000) {
+                    return new Promise((resRpc, rejRpc) => {
+                      const id = nextId++;
+                      const t = setTimeout(() => {
+                        pending.delete(id);
+                        rejRpc(new Error('CDP RPC timeout: ' + method));
+                      }, timeoutMs);
+                      pending.set(id, { resolve: resRpc, reject: rejRpc, timer: t });
+                      ws.send(JSON.stringify({ id, method, params }));
+                    });
+                  },
+                  waitForEvent(eventName, timeoutMs = 12000) {
+                    return new Promise((resEvt, rejEvt) => {
+                      const t = setTimeout(() => {
+                        eventWaiters.delete(eventName);
+                        rejEvt(new Error('CDP event timeout: ' + eventName));
+                      }, timeoutMs);
+                      eventWaiters.set(eventName, { resolve: resEvt, timer: t });
+                    });
+                  },
+                  close() {
+                    try { ws.close(); } catch {}
+                  }
+                });
+              };
+
+              ws.onmessage = (msg) => {
+                let parsed = null;
+                try { parsed = JSON.parse(msg.data); } catch { return; }
+                if (parsed && parsed.id && pending.has(parsed.id)) {
+                  const entry = pending.get(parsed.id);
+                  pending.delete(parsed.id);
+                  clearTimeout(entry.timer);
+                  if (parsed.error) entry.reject(new Error(parsed.error.message || 'CDP error'));
+                  else entry.resolve(parsed.result);
+                } else if (parsed && parsed.method && eventWaiters.has(parsed.method)) {
+                  const entry = eventWaiters.get(parsed.method);
+                  eventWaiters.delete(parsed.method);
+                  clearTimeout(entry.timer);
+                  entry.resolve(parsed.params || {});
+                }
+              };
+
+              ws.onerror = (err) => {
+                clearTimeout(timer);
+                reject(new Error(err?.message || 'WebSocket error'));
+              };
+            });
+          }
+
+          (async () => {
+            const client = await connectCdp(page.webSocketDebuggerUrl);
+            try {
+              const preflightRes = await client.rpc('Runtime.evaluate', {
+                returnByValue: true,
+                expression: `(() => {
+                  const installed = Boolean(window.__agExtendedUiInstalled);
+                  const cleanLifecycle = Boolean(window.__agUiCleanLifecycle);
+                  const dirtyDocument = Boolean(window.__agDirtyDocument);
+                  const alreadyReloaded = window.sessionStorage?.getItem('ag-clean-reload-version') === '5.3.0';
+                  const hasBusyBtn = Boolean(document.querySelector('button[aria-label*="Stop execution" i], button[aria-label*="Cancel (Ctrl+D)" i]'));
+                  const typingRecently = (Date.now() - (window.__agLastEditorInputAt || 0)) < 600;
+                  const composer = document.getElementById('antigravity.agentSidePanelInputBox');
+                  const editor = composer?.querySelector('[contenteditable="true"], textarea');
+                  let draftText = '';
+                  let lexicalJson = null;
+                  if (editor) {
+                    draftText = typeof editor.value === 'string' ? editor.value : (editor.innerText || '');
+                    try {
+                      if (editor.__lexicalEditor?.getEditorState) {
+                        lexicalJson = JSON.stringify(editor.__lexicalEditor.getEditorState().toJSON());
+                      }
+                    } catch {}
+                  }
+                  return {
+                    installed,
+                    cleanLifecycle,
+                    dirtyDocument,
+                    alreadyReloaded,
+                    isIdle: !hasBusyBtn && !typingRecently,
+                    draft: { path: location.pathname, text: draftText, lexicalJson, savedAt: Date.now() }
+                  };
+                })()`
+              });
+              const preflight = preflightRes?.result?.value;
+              const needsOneTimeReload = Boolean(
+                options.reloadLegacy !== false &&
+                preflight &&
+                preflight.installed &&
+                (!preflight.cleanLifecycle || preflight.dirtyDocument) &&
+                !preflight.alreadyReloaded
+              );
+
+              if (needsOneTimeReload && preflight.isIdle) {
+                await client.rpc('Runtime.evaluate', {
+                  returnByValue: true,
+                  expression: `(() => {
+                    try {
+                      window.sessionStorage?.setItem('ag-clean-reload-version', '5.3.0');
+                      const draft = ${JSON.stringify(preflight.draft || {})};
+                      if (draft && (String(draft.text || '').trim() || draft.lexicalJson)) {
+                        window.sessionStorage?.setItem('ag-reload-draft-backup-v1', JSON.stringify(draft));
+                      }
+                    } catch {}
+                    return true;
+                  })()`
+                });
+                await client.rpc('Page.enable', {});
+                const loadPromise = client.waitForEvent('Page.loadEventFired', 15000);
+                await client.rpc('Page.reload', { ignoreCache: false });
+                await loadPromise;
+                for (let i = 0; i < 60; i += 1) {
+                  const readyRes = await client.rpc('Runtime.evaluate', {
+                    returnByValue: true,
+                    expression: `Boolean(document.readyState === 'complete' && (document.querySelector('.agy-shell') || document.getElementById('antigravity.agentSidePanelInputBox')))`
+                  });
+                  if (readyRes?.result?.value) break;
+                  await new Promise((r) => setTimeout(r, 150));
+                }
+                console.log(`[Wallpaper] Reloaded page cleanly once to clear legacy anonymous listeners: ${page.title || page.id}`);
+              } else if (needsOneTimeReload && !preflight.isIdle) {
+                console.log(`[Wallpaper] Page busy during legacy upgrade; deferring one-time clean reload until idle: ${page.title || page.id}`);
+              }
+
+              const themeRes = await client.rpc('Runtime.evaluate', {
+                expression: code,
+                returnByValue: true
+              });
+              if (themeRes?.result?.exceptionDetails) {
+                console.error('[Wallpaper] Theme injection error:', themeRes.result.exceptionDetails.text);
+              }
+
+              if (enhanceScript || memoryScript || extraScripts) {
+                const uiRes = await client.rpc('Runtime.evaluate', {
+                  expression: buildUiPayloadExpression(),
+                  returnByValue: true
+                }, 16000);
+                if (uiRes?.result?.exceptionDetails) {
+                  console.error('[Wallpaper] UI enhancement error:', uiRes.result.exceptionDetails.text);
+                }
+              }
+              console.log(`[Wallpaper] Applied Starlight Obsidian Glass theme to page: ${page.title || page.id}`);
+            } finally {
+              client.close();
             }
-            const expression =
-              'window.__AG_INSTALLED_PLUGINS = ' + JSON.stringify(pluginCatalog) + ';\n' +
-              'window.__AG_USAGE_ENDPOINTS = ' + JSON.stringify(usageEndpoints) + ';\n' +
-              'window.__AG_SKILL_PATHS = ' + JSON.stringify(skillPathMap) + ';\n' +
-              'window.__AG_SKILLS = ' + JSON.stringify(skillCatalog) + ';\n' +
-              'window.__AG_DEFAULT_PROMPTS = ' + JSON.stringify(defaultPrompts) + ';\n' +
-              'window.__AG_SIDECAR_PORT = ' + JSON.stringify(sidecarPort) + ';\n' +
-              'window.__AG_CONFIG = Object.assign({}, window.__AG_CONFIG || {}, ' + JSON.stringify(cfg) + ');\n' +
-              'window.__AG_CONFIG__ = window.__AG_CONFIG;\n' +
-              'document.documentElement.lang = ' + JSON.stringify(cfg.language || 'zh-CN') + ';\n' +
-              applyConfigSource +
-              'document.documentElement.classList.toggle("ag-prompt-sticky", ' + JSON.stringify(cfg.promptSticky === true) + ');\n' +
-              'document.documentElement.dataset.agFont = ' + JSON.stringify(cfg.fontPreset || 'editorial-luxe') + ';\n' +
-              'document.documentElement.style.setProperty("--ag-font-scale", String(' + JSON.stringify(Number(cfg.fontScale) || 1) + '));\n' +
-              'window.__AG_STAR_CONFIG = ' + JSON.stringify({
-                mode: cfg.starEffectMode || 'orbit-meteor',
-                intensity: Number.isFinite(Number(cfg.starIntensity)) ? Number(cfg.starIntensity) : 0.85,
-                frequency: Number.isFinite(Number(cfg.meteorFrequency)) ? Number(cfg.meteorFrequency) : 0.6
-              }) + ';\n' +
-              'if (typeof window.__agUpdatePromptSticky === "function") window.__agUpdatePromptSticky();\n' +
-              enhanceScript + '\n;\n' + memoryScript + extraScripts +
-              '\n;(function(){try{if(window.__agI18n&&window.__AG_CONFIG)window.__agI18n.setLanguage(window.__AG_CONFIG.language||"zh-CN");}catch(e){}})();\n';
-            ws.send(JSON.stringify({
-              id: 2,
-              method: 'Runtime.evaluate',
-              params: { expression, returnByValue: true }
-            }));
-            return;
-          }
-
-          if (response?.result?.exceptionDetails) {
-            console.error('[Wallpaper] UI enhancement error:', response.result.exceptionDetails.text);
-          }
-          ws.close();
-          console.log(`[Wallpaper] Applied Starlight Obsidian Glass theme to page: ${page.title || page.id}`);
-        };
-
-        ws.onerror = (err) => {
-          console.error('[Wallpaper] WS error:', err.message);
-        };
+          })().catch((err) => {
+            console.error('[Wallpaper] Page apply error:', err?.message || err);
+          });
       });
     });
   }).on('error', (err) => {
@@ -6455,12 +7417,20 @@ window.__agApplyConfig = function (patch) {
 }
 
 if (require.main === module) {
-  const customImg = process.argv[2];
-  const customOpacity = process.argv[3] ? parseFloat(process.argv[3]) : undefined;
-  applyWallpaper({
-    wallpaperPath: customImg,
-    opacity: customOpacity
-  });
+  if (process.argv.includes('--catalog-json')) {
+    const pluginDir = path.resolve(__dirname, '..');
+    process.stdout.write(JSON.stringify({
+      plugins: readPluginCatalog(pluginDir),
+      skills: readSkillCatalog(pluginDir)
+    }));
+  } else {
+    const customImg = process.argv[2];
+    const customOpacity = process.argv[3] ? parseFloat(process.argv[3]) : undefined;
+    applyWallpaper({
+      wallpaperPath: customImg,
+      opacity: customOpacity
+    });
+  }
 }
 
-module.exports = { applyWallpaper };
+module.exports = { applyWallpaper, readPluginCatalog, readSkillCatalog };

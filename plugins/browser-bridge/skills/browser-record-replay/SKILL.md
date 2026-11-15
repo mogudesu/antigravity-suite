@@ -45,6 +45,10 @@ description: 对标豆包工作「浏览器录制与回放」的演示即生成�
    - 将用户在 HUD 中留下的 `userNote`（如筛选条件、异常处理规则、提取字段要求）转化为对应步骤的执行约束或提取后处理逻辑。
 3. **提炼可变输入参数（`parameters`）**：
    - 检查所有 `type`、`select`、`navigate` 步骤中的固定字面量（如搜索词 `"蓝牙耳机"`、分类筛选 `"按销量"`、起始 URL），将其替换为模板占位符 `{{参数名}}`（例如 `{{keyword}}`），并在 `parameters` 字段中记录每个参数的名称、描述、默认值和是否必填。
+4. **把业务规则编译成结构化步骤，而不是只写进 SKILL.md**：
+   - 用户备注或对话要求「重复 N 次」「每次间隔 3–5 秒」「确认任务已完成」「失败重试」「按页面状态分支」时，用 `loop` / `throttle` / `assert` / `retry` / `if` / `evaluate` + `saveAs` 写进 `workflow.steps`，让规则真的被确定性执行。
+   - `vars` 可以传数组（`loop.items` 用 `{{数组变量}}`）；`{{变量|url}}` 拼查询串、`{{变量|json}}` 生成合法 JS 字面量。完整字段见模板第 4 节。
+   - 这些步骤不是录制动作，必须标 `"synthesized": true` 并在 SKILL.md 写明规则来源；录制清洗后保留的步骤仍带 `sourceStepIndex`。
 
 ---
 
@@ -64,6 +68,13 @@ description: 对标豆包工作「浏览器录制与回放」的演示即生成�
    - **首选快放指令（Fast Path）**：指导 Agent 先调用 `browser_launch` 确认连接，再调用 `browser_record_replay` 传入 `workflow.recording.json` 绝对路径和本次用户的 `vars` 参数一键跑完流程并拿到 `extractedData`。
    - **分步语义说明与视觉自愈兜底（Self-Healing Fallback）**：按顺序写出每一步的业务意图与多重定位特征；当 `browser_record_replay` 因网页改版或偶发弹窗返回 `failedStepIndex` 时，Agent 无需重头再来，直接从 `failedStepIndex` 开始调用 `browser_snapshot` 识别当前页面并完成剩余步骤。
    - **结果交付规范**：说明如何整理 `extractedData`（如输出 Markdown 表格、保存本地 CSV/JSON 或结合其他工具处理）。
+3. **编译门禁（强制，防「文档幻觉」）**：两个文件生成后立即运行
+   `node scripts/validate-compiled-skill.js <skill目录> --recording <原始录制.json>`。
+   存在 ERROR 一律修完再交付，WARN 逐条确认或在 SKILL.md 写明理由。
+   - 严禁把录制轨迹里没有的页面、动作、参数写成「标准流程」——文档与 `workflow.recording.json` 脱节时，回放必然跑不完目标；
+   - 每个录制来源的 step 保留 `sourceStepIndex` 指向原始录制，被删除的步骤写明清洗理由；规则补写的 step 必须标 `synthesized: true`（校验器会递归检查 loop/if/retry 的子步骤）；
+   - `scripts/` 下每个辅助脚本必须有明确执行入口（`browser_evaluate` 或 `node`），不允许无引用的死代码；
+   - SKILL.md 第一步必须是 `browser_record_replay(workflowPath, vars)` 确定性快放，自然语言 SOP 只能作断点兜底。
 
 ---
 
@@ -72,4 +83,5 @@ description: 对标豆包工作「浏览器录制与回放」的演示即生成�
 生成完毕后，向用户汇报：
 1. 展示从演示操作中识别出的核心步骤流与提炼出的可变参数列表（如 `{{keyword}}`）。
 2. 提供新生成的 `SKILL.md` 和 `workflow.recording.json` 文件路径链接。
-3. 说明下次如何一句话触发该 Skill（例如：“用 `xxx` 技能帮我查一下‘机械键盘’的数据”），或按需立即调用 `browser_record_replay` 试跑验证。
+3. **必须试跑验证**：用 `browser_record_replay` 实跑一遍编译后的 `workflow.recording.json`，把结果（完成/中断步骤、环境、时间）写进 SKILL.md 或 CHANGELOG；未试跑的产物显式标注 `verified:false`，不得声称「已验证」。
+4. 说明下次如何一句话触发该 Skill（例如：“用 `xxx` 技能帮我查一下‘机械键盘’的数据”）。

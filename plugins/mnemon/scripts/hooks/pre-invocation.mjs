@@ -2,70 +2,60 @@
 /**
  * PreInvocation (Antigravity protocol).
  *
- * Emits { injectSteps: [{ ephemeralMessage }] }: the resident persona/USER/
- * MEMORY block is refreshed on every invocation, together with relevant
- * memories and project documents. It is attached for this turn only (used
- * once, never appended to the conversation history as a visible bubble).
- * Refreshing here—rather than relying only on SessionStart—keeps resumed and
- * long-running conversations grounded in the current persona files.
+ * Resident context is injected once at SessionStart and stays cache-stable
+ * across all turns. Injecting ephemeralMessage on PreInvocation churns the
+ * prompt cache prefix on every step, so this hook returns {} by default and
+ * keeps any per-session signature stamps isolated under signatures/<sid>.json.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { readStdin, parseEvent, findTurnText, findUserTurnText, sessionId, runHook, openStore } from '../lib/hook.mjs';
+import { readStdin, parseEvent, findUserTurnText, sessionId, runHook } from '../lib/hook.mjs';
 import * as store from '../lib/store.mjs';
 
-// One user turn fans out into many tool steps and this hook fires on each of
-// them; repeating the same ~4.5KB block per step only inflates the context.
-const REPEAT_WINDOW_MS = 120000;
+const MAX_SIGNATURE_FILES = 50;
 
-function signaturePath() {
-  return path.join(store.resolveDataDir(), '.recall-signature.json');
+function signaturePath(sid) {
+  const cleanId = store.slugify(sid || 'default', 'default');
+  return path.join(store.resolveDataDir(), 'signatures', `${cleanId}.json`);
 }
 
-function alreadyInjected(signature) {
+function pruneOldSignatures(dir) {
   try {
-    const previous = JSON.parse(fs.readFileSync(signaturePath(), 'utf8'));
-    return Boolean(
-      previous &&
-      previous.signature === signature &&
-      Date.now() - Number(previous.at || 0) < REPEAT_WINDOW_MS
-    );
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.endsWith('.json'))
+      .map((d) => {
+        const full = path.join(dir, d.name);
+        return { full, mtimeMs: fs.statSync(full).mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const stale of entries.slice(MAX_SIGNATURE_FILES)) {
+      store.removeFile(stale.full);
+    }
   } catch {
-    return false;
+    /* best effort cleanup */
   }
 }
 
-function rememberSignature(signature) {
+function rememberSessionSignature(sid, signature) {
   try {
-    store.writeText(signaturePath(), JSON.stringify({ signature, at: Date.now() }));
+    const file = signaturePath(sid);
+    const dir = path.dirname(file);
+    store.ensureDir(dir);
+    store.writeText(file, JSON.stringify({ sessionId: sid, signature, at: Date.now() }));
+    pruneOldSignatures(dir);
   } catch {
-    /* recall still works without the dedupe stamp */
+    /* ignore */
   }
 }
 
 runHook('pre-invocation', async () => {
   const event = parseEvent(await readStdin());
-  const userText = findUserTurnText(event, { min: 8, max: 2 });
-  const prompt = (userText.length ? userText : findTurnText(event, { min: 8, max: 2 })).join('\n').trim();
-  if (!prompt) return {};
+  const userText = findUserTurnText(event, { min: 1, max: 2 });
+  if (!userText.length) return {};
 
-  const signature = `${sessionId(event)}|${createHash('sha1').update(prompt).digest('hex')}`;
-  if (alreadyInjected(signature)) return {};
-
-  const engine = openStore({ light: true });
-  const context = engine.buildTurnContext({ prompt, session: sessionId(event) });
-  const hasResident = Boolean(
-    context.persona ||
-    context.residentBase ||
-    (Array.isArray(context.pinned) && context.pinned.length)
-  );
-  if (!context.relevant.length && !context.documents.length && !hasResident) return {};
-
-  // The resident persona/USER/MEMORY block is refreshed every invocation, not
-  // only at SessionStart: long conversations, resumed sessions and sessions
-  // created before the persona was written must still be grounded.
-  const block = engine.formatContextBlock(context, { header: 'mnemon-recall', includeUsage: false });
-  rememberSignature(signature);
-  return { injectSteps: [{ ephemeralMessage: block }] };
+  const sid = sessionId(event);
+  const signature = `${sid}|${createHash('sha1').update(userText.join('\n')).digest('hex')}`;
+  rememberSessionSignature(sid, signature);
+  return {};
 });

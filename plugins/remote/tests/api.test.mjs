@@ -99,6 +99,20 @@ test('守护进程 API：健康检查 / 机器人 CRUD / 脱敏 / 校验', async
   assert.equal(convs.data.ok, true);
   assert.ok(Array.isArray(convs.data.items));
 
+  // 控制面板 HTML、品牌 Logo 与实时切换接口校验
+  const panelRes = await fetch(`${BASE}/ui/panel.html`);
+  assert.equal(panelRes.status, 200);
+  const panelHtml = await panelRes.text();
+  assert.ok(panelHtml.includes('id="liveModelSelect"'));
+  assert.ok(panelHtml.includes('function openScan('));
+  assert.ok(panelHtml.includes('function paintManual('));
+
+  const logoRes = await fetch(`${BASE}/assets/logo.png`);
+  assert.equal(logoRes.status, 200);
+
+  const selectBad = await api('/api/models/select', { method: 'POST', body: {} });
+  assert.equal(selectBad.status, 400);
+
   // 删除
   const botId = created.data.bot.id;
   const removed = await api(`/api/bots/${botId}`, { method: 'DELETE' });

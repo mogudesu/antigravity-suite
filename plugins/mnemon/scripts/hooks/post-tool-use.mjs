@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 /**
- * PostToolUse: the turn memory bar.
+ * PostToolUse: audit receipt recorder.
  *
- * After any mnemon_memory_* tool call, append a one-line receipt to the tool
- * result and record it, so the conversation shows what memory the turn touched.
- * If the original result cannot be read from the event, the hook leaves the
- * result untouched rather than risk replacing it.
+ * Records what memory tools read/wrote without rewriting tool outputs, keeping
+ * prefix/message caches clean. Strictly returns {}.
  */
 import { readStdin, parseEvent, pick, sessionId, runHook, openStore } from '../lib/hook.mjs';
 
@@ -25,7 +23,10 @@ function asJson(value) {
 }
 
 function summarize(toolName, payload) {
-  const short = String(toolName || 'memory').replace(/^mcp:/, '').replace(/^mnemon_memory_/, '');
+  const short = String(toolName || 'memory')
+    .replace(/^mcp:/, '')
+    .replace(/^antigravity[^_]*_[^_]*_/, '')
+    .replace(/^mnemon_memory_/, '');
   const data = asJson(payload);
   if (!data) return `${short}: recorded`;
   if (typeof data.action === 'string') {
@@ -41,14 +42,12 @@ function summarize(toolName, payload) {
 
 runHook('post-tool-use', async () => {
   const event = parseEvent(await readStdin());
-  const toolName = pick(event, ['toolName', 'tool_name', 'name', 'tool.name']);
-  const rawResult = pick(event, ['toolResult', 'tool_result', 'result', 'output', 'tool.output']);
-  const rawInput = pick(event, ['toolInput', 'tool_input', 'arguments', 'tool.input']);
+  const toolName = pick(event, ['toolCall.name', 'toolName', 'tool_name', 'name', 'tool.name']);
+  const rawResult = pick(event, ['toolCall.result', 'toolResult', 'tool_result', 'result', 'output', 'tool.output']);
+  const rawInput = pick(event, ['toolCall.arguments', 'toolInput', 'tool_input', 'arguments', 'tool.input']);
 
   const engine = openStore({ light: true });
   const receipt = summarize(toolName, rawResult ?? rawInput);
   engine.recordReceipt({ session: sessionId(event), read: [], wrote: [], note: receipt });
-
-  if (typeof rawResult !== 'string' || !rawResult.trim()) return {};
-  return { overwriteResult: `${rawResult.trimEnd()}\n\n[mnemon] ${receipt}` };
+  return {};
 });

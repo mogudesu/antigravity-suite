@@ -58,7 +58,7 @@ class Backend:
         """Write a PNG of ``region`` (or the whole screen) to ``path``."""
         raise UnsupportedAction("screen capture is not supported on %s" % self.platform)
 
-    def screenshot(self, window_id=None, region=None, max_width=None):
+    def screenshot(self, window_id=None, region=None, max_width=None, save_to_disk=True):
         """Capture the screen, a window or a region and return the PNG bytes.
 
         Shared by every backend so the tool layer sees one contract:
@@ -68,23 +68,35 @@ class Backend:
             raise UnsupportedAction(
                 "screen capture is unavailable on this system (%s)" % self.platform
             )
+        hwnd = None
         if window_id:
             window = self.resolve_window(window_id)
+            hwnd = window.get("id")
             bounds = window.get("bounds") or {}
-            if bounds:
+            if bounds and region is None:
                 region = (
                     bounds.get("x", 0),
                     bounds.get("y", 0),
                     bounds.get("width", 0),
                     bounds.get("height", 0),
                 )
-        path = self._shot_path()
-        self.capture_screenshot(path, region, max_width)
-        try:
-            with open(path, "rb") as handle:
-                data = handle.read()
-        except OSError as exc:
-            raise BackendError("captured file could not be read: %s" % exc)
+        path = self._shot_path() if save_to_disk else None
+        if hwnd is not None and region is not None:
+            try:
+                captured = self.capture_screenshot(path, region, max_width, hwnd=hwnd)
+            except TypeError:
+                captured = self.capture_screenshot(path, region, max_width)
+        else:
+            captured = self.capture_screenshot(path, region, max_width)
+        if not save_to_disk and isinstance(captured, (bytes, bytearray)):
+            data = bytes(captured)
+            path = None
+        else:
+            try:
+                with open(path, "rb") as handle:
+                    data = handle.read()
+            except OSError as exc:
+                raise BackendError("captured file could not be read: %s" % exc)
         width, height = png_size(data)
         return {
             "png": data,

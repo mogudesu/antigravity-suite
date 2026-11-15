@@ -34,7 +34,7 @@ Antigravity plugin format. See [`docs/PORTING.md`](docs/PORTING.md) for the conc
 | MCP server | `mcp_config.json` | 29 `mnemon_memory_*` tools for search, save, edit, documents, spaces, candidates, receipts, audit, backup, mirror and self-heal |
 | Agents | `agents/` | `memory-curator` (writes and deduplicates) and `memory-auditor` (read-only review) |
 | Rules | `rules/` | Always-on memory discipline, plus a glob-scoped rule for the memory files |
-| Hooks | `hooks.json` | `SessionStart` injects the initial system message, `PreInvocation` refreshes PERSONA/USER/MEMORY plus relevant recall as an ephemeral message on every invocation, `PostToolUse` writes receipts, `Stop` captures candidates and returns `{}` |
+| Hooks | `hooks.json` | `SessionStart` injects PERSONA/USER/MEMORY plus pinned summary once per session as a system message, `PostToolUse` writes receipts, `Stop` captures candidates and returns `{}` (no `PreInvocation` process churn) |
 
 ## Install
 
@@ -61,9 +61,8 @@ Customizations dropdown, the tools appear on the plugin's MCP tab, and the hooks
 1. Tell a conversation something worth keeping: *"Remember that this project deploys with pnpm and Node 24."*
 2. Run `/mnemon-remember` — it distils the facts, deduplicates, and answers with a receipt per fact:
    `added "Deploys use pnpm" → space toolchain (mem_1f2e3d4c5b)`.
-3. Start a new conversation. `PERSONA.md`, `USER.md` and `MEMORY.md` are injected as a system message, pinned
-   memories are listed, and relevant memories for your first question are recalled by the `PreInvocation` hook as
-   an ephemeral message (no fake user bubble).
+3. Start a new conversation. `PERSONA.md`, `USER.md`, `MEMORY.md` and pinned summaries are injected once at
+   `SessionStart` as a system message (keeping the prompt cache prefix stable), and deeper facts are recalled on demand via `memory_recall` / `memory_doc`.
 4. Run `/mnemon-review` at the end of a session to adopt or reject anything captured and to reconcile conflicts.
 5. Run `/mnemon-system` to see status, spaces, documents and receipts — or from a terminal:
 
@@ -77,7 +76,7 @@ node scripts/mnemon.mjs audit
 
 1. 对对话说一句值得记住的事，例如「记住：这个项目用 pnpm 和 Node 24 部署」。
 2. 运行 `/mnemon-remember`：它会把事实压缩成一句话、与已有记忆去重，并逐条回报写到了哪个记忆空间。
-3. 新开或继续一个会话：`SessionStart` 先注入一次 system message；每次模型调用前 `PreInvocation` 会把当前的 `PERSONA.md`、`USER.md`、`MEMORY.md` 与置顶记忆刷新成 ephemeralMessage，并附带与当前问题相关的记忆/文档，因此旧会话和普通问候也会自动带上人设，不需要用户先要求“读取记忆”，也不会产生伪造的用户气泡。
+3. 新开一个会话：`SessionStart` 一次性把 `PERSONA.md`、`USER.md`、`MEMORY.md` 与置顶记忆摘要作为 system message 注入会话前缀（后续轮次不再用 `PreInvocation` 逐轮注入 `ephemeralMessage`，保护提示词缓存并避免进程频繁拉起）；需要深层事实时由 Agent 按需调用 `memory_recall` / `memory_doc` 检索。
 4. 会话结束运行 `/mnemon-review`：采纳或驳回本轮捕获的候选事实，并处理互相矛盾的记忆。
 5. `/mnemon-system` 查看状态、记忆空间、项目文档与回执；也可以在终端用 `node scripts/mnemon.mjs status`。
 

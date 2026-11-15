@@ -252,7 +252,7 @@
         const json = JSON.stringify(payload);
         const body = new TextEncoder().encode(json);
         const frame = new Uint8Array(5 + body.length);
-        frame[4] = body.length;
+        new DataView(frame.buffer).setUint32(1, body.length, false);
         frame.set(body, 5);
         const response = await fetch("/exa.language_server_pb.LanguageServerService/ConvertTrajectoryToMarkdown", {
           method: "POST",
@@ -269,7 +269,7 @@
         const buffer = new Uint8Array(await response.arrayBuffer());
         let offset = 0;
         while (offset + 5 <= buffer.length) {
-          const length = (buffer[offset + 1] << 24) | (buffer[offset + 2] << 16) | (buffer[offset + 3] << 8) | buffer[offset + 4];
+          const length = new DataView(buffer.buffer, buffer.byteOffset + offset + 1, 4).getUint32(0, false);
           const start = offset + 5;
           const end = start + length;
           offset = end;
@@ -352,7 +352,25 @@
     }, 300);
   };
 
-  new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+  const bus = window.__agStarlightBus;
+  const observer = bus ? null : new MutationObserver(schedule);
+  if (bus) {
+    bus.onMutation("quick-copy", schedule);
+  } else {
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
   document.addEventListener("ag-config-updated", schedule);
-  setInterval(tick, 1500);
+  const timer = bus ? bus.onTick("quick-copy", 1500, tick) : setInterval(tick, 1500);
+  window.__agQuickCopyDispose = () => {
+    if (scheduled) clearTimeout(scheduled);
+    scheduled = 0;
+    if (observer) observer.disconnect();
+    if (bus && typeof timer === "function") timer();
+    else clearInterval(timer);
+    document.removeEventListener("ag-config-updated", schedule);
+    document.querySelectorAll(`.${ARTIFACT_CLASS},.${CHAT_CLASS}`).forEach((node) => node.remove());
+    document.getElementById(STYLE_ID)?.remove();
+    document.getElementById(TOAST_ID)?.remove();
+    delete window.__agQuickCopyInstalledV2;
+  };
   tick();})();

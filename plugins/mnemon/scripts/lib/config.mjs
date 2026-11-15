@@ -22,7 +22,7 @@ export const DEFAULT_CONFIG = {
   candidateBudget: 20,
   keepRevisions: 20,
   redactSecrets: true,
-  autoMergeThreshold: 0.82,
+  autoMergeThreshold: 0.85,
   duplicateThreshold: 0.82,
   conflictContainment: 0.55,
   staleAfterDays: 180,

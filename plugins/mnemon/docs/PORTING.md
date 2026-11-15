@@ -15,7 +15,7 @@ for DeepSeek Harness. Its model is kept; its packaging is replaced with the Anti
 | Sources (own memory and its operations) | MCP tools grouped per source | Memories, documents, spaces, candidates, receipts |
 | Strategies (layered, general, auto-capture, light-context, scoped) | `config.strategy` + `config.enhancements` | Four strategies and three enhancements, switchable without moving data |
 | Core validating a turn into one immutable View | `buildTurnContext()` → `formatContextBlock()` | The hook injects the formatted view for the turn |
-| Host pinning the View to the turn | `SessionStart` / `PreInvocation` `injectSteps` | The host pins the injected step to that turn |
+| Host pinning the View to the turn | `SessionStart` `injectSteps` (`systemMessage`) | The host injects the stable view once at session start; deeper facts are pulled on demand via MCP tools |
 | Turn memory bar under each reply | `PostToolUse` receipt line + `receipts/<date>.jsonl` | Appends `[mnemon] save: added mem_… → space …` to the tool result |
 | Brain mark: hand a reply to a task Agent | `/mnemon-remember` + the `memory-curator` agent | Distil, deduplicate, write, report the receipt |
 | Memory System page (status, graph, edit) | the `/mnemon-system` skill plus the `status`, `entities`, `list`, `read`, `update` tools | Text-based instead of a WebUI |

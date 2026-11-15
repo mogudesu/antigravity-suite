@@ -1,11 +1,24 @@
 "use strict";
 
-/** 供 Antigravity 调用的工具清单。所有调用最终转发给浏览器扩展执行。 */
+/** 供 Antigravity 调用的工具清单。默认由 isolated 后台无头引擎执行，扩展通道用于录制或明确指定 mode="extension"。 */
 
 const BROWSER_PROP = {
   type: "string",
   enum: ["edge", "chrome", "chromium", "opera"],
-  description: "目标浏览器（装了本扩展的那一个）。省略时用最近连接的那个；同时开着 Edge 和 Chrome 时才需要显式指定。",
+  description: "目标浏览器（默认 edge）。",
+};
+const MODE_PROP = {
+  type: "string",
+  enum: ["isolated", "extension"],
+  description: "执行引擎模式：普通任务默认 isolated（无头后台，零弹窗、不切换用户当前页面、不抢焦点、多会话并发）；仅需操作日常已登录浏览器或 RPA 录制回放时显式传 extension。",
+};
+const SESSION_PROP = {
+  type: "string",
+  description: "并发隔离会话 ID；省略时自动按当前 MCP 会话隔离，多子 Agent 并行互不干扰。",
+};
+const ALLOW_SENSITIVE_PROP = {
+  type: "boolean",
+  description: "是否允许向敏感字段（密码/OTP/银行卡）输入内容，默认 false（安全策略拦截）。",
 };
 const TAB_PROP = { type: "integer", description: "目标标签页 id。省略时用当前活动标签页。" };
 const TARGET_PROPS = {
@@ -17,15 +30,18 @@ const TARGET_PROPS = {
 const TOOLS = [
   {
     name: "browser_launch",
-    description: "启动本机 Edge / Chrome（或自定义浏览器）并等待浏览器扩展握手，是浏览器操作的第一步。browser=edge（默认）/chrome/custom；custom 必须给 executablePath。若对应浏览器扩展已连接则不重复启动。扩展未安装时返回扩展目录路径与安装指引（含 scripts/open-edge-extension-setup.ps1）。dryRun=true 只返回将要执行的命令行，不真正启动浏览器。",
+    description: "启动或检查浏览器控制引擎：默认 mode=isolated 且 headless=true 在后台无头静默启动；显式传 mode=extension 才连接本机可见扩展通道。返回 mode/headless/sessionId/instanceReused；dryRun=true 仅校验参数不修改会话模式。",
     inputSchema: {
       type: "object",
       properties: {
         browser: { type: "string", enum: ["edge", "chrome", "custom"], description: "要启动的浏览器，默认 edge（Microsoft Edge）。" },
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
+        headless: { type: "boolean", description: "isolated 模式下是否无头后台运行，默认 true。" },
         executablePath: { type: "string", description: "浏览器 .exe 的绝对路径；给定时优先于 browser 的已知路径，browser=custom 时必填。" },
-        profileDirectory: { type: "string", description: "浏览器配置文件目录名，如 Default 或 Profile 1（对应 --profile-directory）。" },
+        profileDirectory: { type: "string", description: "浏览器配置文件目录名，如 Default 或 Profile 1（仅 extension 模式适用）。" },
         url: { type: "string", description: "启动后打开的地址，默认 about:blank。" },
-        waitConnectMs: { type: "integer", description: "等待扩展握手的毫秒数，默认 8000。" },
+        waitConnectMs: { type: "integer", description: "等待握手的毫秒数，默认 8000。" },
         dryRun: { type: "boolean", description: "true 时只拼装并返回命令行，不启动浏览器（用于验证启动参数）。" },
       },
       additionalProperties: false,
@@ -33,12 +49,12 @@ const TOOLS = [
   },
   {
     name: "browser_status",
-    description: "查看桥接状态：浏览器类型、扩展版本、连接状态、标签页数量、CDP 附加情况，以及用户当前标签页（activeTab）与代理专属后台标签页（leaseTab/leaseCursor）。排查「没反应」时先调它。",
-    inputSchema: { type: "object", properties: { browser: BROWSER_PROP }, additionalProperties: false },
+    description: "查看浏览器控制引擎状态：当前模式（isolated/extension）、标签页数量与当前会话活动标签。",
+    inputSchema: { type: "object", properties: { browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }, additionalProperties: false },
   },
   {
     name: "browser_tabs",
-    description: "列出 / 切换 / 关闭 / 新建浏览器标签页。list 返回所有标签页的 id、标题、URL、groupId 与 leased 标记。new 在当前窗口创建代理专属标签页、置为 active 并加入「谷谷嘎嘎控制中」紫色分组；用户原标签页保持打开、不被改写。activate 会显式切到前台。",
+    description: "列出 / 切换 / 关闭 / 新建浏览器标签页。",
     inputSchema: {
       type: "object",
       properties: {
@@ -46,6 +62,8 @@ const TOOLS = [
         tabId: TAB_PROP,
         url: { type: "string", description: "action=new 时要打开的地址，可省略（about:blank）。" },
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       required: ["action"],
       additionalProperties: false,
@@ -53,7 +71,7 @@ const TOOLS = [
   },
   {
     name: "browser_open",
-    description: "在代理专属分组标签页里打开地址；该标签页在当前窗口内、属于「谷谷嘎嘎控制中」紫色分组，会激活以便用户看到鼠标和原生提示条。用户原标签页保持打开、不被改写。传入的不是 URL 时自动按搜索处理（默认必应，可在扩展弹窗里改）。newTab=true 会再创建一个分组专属标签页并成为 leaseTab；需要控制用户指定的标签页时显式传 tabId。",
+    description: "打开网页（或关键词搜索）。默认在后台孤立会话标签页中静音打开，不弹调试条且不打扰用户当前浏览器。",
     inputSchema: {
       type: "object",
       properties: {
@@ -61,6 +79,8 @@ const TOOLS = [
         newTab: { type: "boolean", description: "true 则新开标签页，默认在当前标签页导航。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       required: ["url"],
       additionalProperties: false,
@@ -76,6 +96,8 @@ const TOOLS = [
         bypassCache: { type: "boolean", description: "reload 时忽略缓存。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       required: ["action"],
       additionalProperties: false,
@@ -83,37 +105,42 @@ const TOOLS = [
   },
   {
     name: "browser_snapshot",
-    description: "读取当前页面的结构化快照（标题、URL、可交互元素带 ref 编号、标题层级与可见文本）。默认读取「谷谷嘎嘎控制中」分组里的 leaseTab，不会触碰用户原标签页；传 tabId 可读取指定标签。控制会话中页面内会常驻可见鼠标（pointer-events:none）。做任何点击/输入之前先调它拿到 ref。ref 按 DOM 顺序确定性编号，同一页面结构下重复调用编号不变；但页面跳转、局部重渲染或元素被移除后旧 ref 会失效，此时重新 snapshot 即可。",
+    description: "读取当前页面结构化快照（支持穿透 iframe 与 Shadow DOM，输出带 ref 编号的可交互元素）。",
     inputSchema: {
       type: "object",
       properties: {
-        maxChars: { type: "integer", description: "快照字符上限；compact 模式默认 6000，普通模式默认 14000。" },
-        compact: { type: "boolean", description: "紧凑模式：只输出可交互元素、标题与 ref，省略静态正文，显著降低长页面上下文消耗。默认 false。" },
-        mode: { type: "string", enum: ["compact"], description: "compact 的等价写法。" },
+        maxChars: { type: "integer", description: "快照字符上限；compact 模式默认 6000，普通模式默认 12000。" },
+        compact: { type: "boolean", description: "紧凑模式：只输出可交互元素、标题与 ref，省略静态正文。" },
+        interactiveOnly: { type: "boolean", description: "仅输出可交互元素与 ref。" },
+        mode: { type: "string", enum: ["compact", "isolated", "extension"], description: "compact 或指定执行模式。" },
         maxDepth: { type: "integer", description: "DOM 遍历深度上限，默认 40。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        sessionId: SESSION_PROP,
       },
       additionalProperties: false,
     },
   },
   {
     name: "browser_screenshot",
-    description: "对当前标签页截图并返回图片。CDP 通道可用时支持整页截图（fullPage=true）。",
+    description: "对当前标签页截图并返回图片（后台无头模式在最小化/锁屏下也可正常截图，并自动限制最大宽度 <= 1280px）。",
     inputSchema: {
       type: "object",
       properties: {
-        fullPage: { type: "boolean", description: "true 截整页（需要 CDP），默认只截可视区。" },
-        format: { type: "string", enum: ["png", "jpeg"], description: "默认 png。" },
+        fullPage: { type: "boolean", description: "true 截整页，默认只截可视区。" },
+        format: { type: "string", enum: ["png", "jpeg"], description: "默认 jpeg（isolated 模式）/ png（extension 模式）。" },
+        quality: { type: "integer", description: "jpeg 质量 1-100，默认 82。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       additionalProperties: false,
     },
   },
   {
     name: "browser_click",
-    description: "点击元素。优先用 ref / selector / text 定位；也可直接给视口坐标 x、y。CDP 可用时派发真实鼠标事件，否则退回元素原生 click()。",
+    description: "点击元素。优先用 ref / selector / text 定位（支持 iframe / Shadow DOM），也可给视口坐标 x、y。",
     inputSchema: {
       type: "object",
       properties: Object.assign({
@@ -122,49 +149,51 @@ const TOOLS = [
         y: { type: "number", description: "视口 Y 坐标。" },
         button: { type: "string", enum: ["left", "right", "middle"], description: "默认 left。" },
         clickCount: { type: "integer", description: "连击次数，默认 1；2 表示双击。" },
-      }, TARGET_PROPS, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+      }, TARGET_PROPS, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       additionalProperties: false,
     },
   },
   {
     name: "browser_type",
-    description: "向输入框写文本。默认用原生 value setter + input/change 事件，对 React / Vue 受控输入有效；realKeys=true 改为逐字符派发真实按键。密码框会被安全策略拒绝（不读取、不写入），请让用户手动输入密码。",
+    description: "向输入框写文本（默认拦截密码、OTP 与银行卡敏感字段）。",
     inputSchema: {
       type: "object",
       properties: Object.assign({
         text: { type: "string", description: "要写入的文本。" },
         clear: { type: "boolean", description: "写入前清空，默认 true；false 表示追加。" },
-        submit: { type: "boolean", description: "写完后提交所属表单。" },
-        realKeys: { type: "boolean", description: "逐字符真实按键（需要 CDP），适合有 keydown 监听的站点。" },
-      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+        submit: { type: "boolean", description: "写完后提交/回车。" },
+        realKeys: { type: "boolean", description: "逐字符真实按键。" },
+        allowSensitive: ALLOW_SENSITIVE_PROP,
+      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector, textTarget: { type: "string", description: "当省略 ref/selector 时用于定位的元素文本" } }, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       required: ["text"],
       additionalProperties: false,
     },
   },
   {
     name: "browser_press",
-    description: "按键。支持 Enter / Tab / Escape / Backspace / Delete / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / Home / End / PageUp / PageDown / Space 或单个字符。",
+    description: "按键或组合键（支持 Enter / Tab / Escape / Control+a / Shift+Enter 等）。",
     inputSchema: {
       type: "object",
       properties: Object.assign({
-        key: { type: "string", description: "按键名或单个字符。" },
-      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+        key: { type: "string", description: "按键名、组合键或单个字符。" },
+        allowSensitive: ALLOW_SENSITIVE_PROP,
+      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       required: ["key"],
       additionalProperties: false,
     },
   },
   {
     name: "browser_hover",
-    description: "把鼠标移到元素上，触发 hover 态。需要 CDP 通道。",
+    description: "把鼠标移到元素上触发 hover 态。",
     inputSchema: {
       type: "object",
-      properties: Object.assign({ nth: { type: "integer" } }, TARGET_PROPS, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+      properties: Object.assign({ nth: { type: "integer" } }, TARGET_PROPS, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       additionalProperties: false,
     },
   },
   {
     name: "browser_scroll",
-    description: "滚动页面。给 direction + amount，或直接给 deltaX / deltaY；给 ref / selector 则滚动到该元素。",
+    description: "滚动页面或指定容器。传 ref/selector 并附带 direction/deltaY 时优先滚动该容器或在该元素处滚轮。",
     inputSchema: {
       type: "object",
       properties: Object.assign({
@@ -172,7 +201,7 @@ const TOOLS = [
         amount: { type: "number", description: "滚动像素，默认 800。" },
         deltaX: { type: "number", description: "水平滚动量，与 direction 二选一。" },
         deltaY: { type: "number", description: "垂直滚动量，与 direction 二选一。" },
-      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       additionalProperties: false,
     },
   },
@@ -184,7 +213,7 @@ const TOOLS = [
       properties: Object.assign({
         value: { type: "string", description: "选项的 value。" },
         label: { type: "string", description: "选项的可见文本，value 未给时使用。" },
-      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+      }, { ref: TARGET_PROPS.ref, selector: TARGET_PROPS.selector }, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       additionalProperties: false,
     },
   },
@@ -195,13 +224,13 @@ const TOOLS = [
       type: "object",
       properties: Object.assign({
         maxChars: { type: "integer", description: "文本上限，默认 8000。" },
-      }, TARGET_PROPS, { tabId: TAB_PROP, browser: BROWSER_PROP }),
+      }, TARGET_PROPS, { tabId: TAB_PROP, browser: BROWSER_PROP, mode: MODE_PROP, sessionId: SESSION_PROP }),
       additionalProperties: false,
     },
   },
   {
     name: "browser_evaluate",
-    description: "在页面主世界执行 JavaScript 表达式并返回结果（绕开页面 CSP，支持 await）。需要 CDP 通道。",
+    description: "在页面主世界执行 JavaScript 表达式并返回结果（支持 await）。",
     inputSchema: {
       type: "object",
       properties: {
@@ -209,6 +238,8 @@ const TOOLS = [
         awaitPromise: { type: "boolean", description: "表达式返回 Promise 时是否等待，默认 true。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       required: ["expression"],
       additionalProperties: false,
@@ -216,7 +247,7 @@ const TOOLS = [
   },
   {
     name: "browser_wait_for",
-    description: "等待某个选择器出现或某段文本出现，超时返回失败。",
+    description: "等待某个选择器或文本出现（支持 iframe 与 Shadow DOM），超时返回失败。",
     inputSchema: {
       type: "object",
       properties: {
@@ -225,13 +256,15 @@ const TOOLS = [
         timeoutMs: { type: "integer", description: "超时毫秒，默认 15000。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       additionalProperties: false,
     },
   },
   {
     name: "browser_console",
-    description: "读取页面控制台日志（console.*、未捕获异常、浏览器日志）。需要 CDP 已附加到该标签页。",
+    description: "读取页面控制台日志（console.*、未捕获异常）。",
     inputSchema: {
       type: "object",
       properties: {
@@ -240,13 +273,15 @@ const TOOLS = [
         clear: { type: "boolean", description: "读取后清空缓冲。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
       },
       additionalProperties: false,
     },
   },
   {
     name: "browser_network",
-    description: "读取页面的网络请求记录（请求、响应、失败）。需要 CDP 已附加到该标签页。",
+    description: "读取页面的网络请求与失败记录。",
     inputSchema: {
       type: "object",
       properties: {
@@ -255,6 +290,44 @@ const TOOLS = [
         clear: { type: "boolean", description: "读取后清空缓冲。" },
         tabId: TAB_PROP,
         browser: BROWSER_PROP,
+        mode: MODE_PROP,
+        sessionId: SESSION_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_auth_sync",
+    description: "管理独立后台引擎（isolated-profile）的登录态：status 查看已登录域与状态文件，import 导入 cookies/storageState（含从已连接的 extension 当前站点同步），export 导出命名登录态，clear 清理 Cookie。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["status", "import", "export", "clear"], description: "默认 status。" },
+        name: { type: "string", description: "命名登录态档案名（存于 ~/.gemini/memory/browser-bridge/auth-states/）。" },
+        source: { type: "string", enum: ["file", "cookies", "extension"], description: "import 来源：file/cookies 或已连接 extension 当前活动站点。" },
+        storageStatePath: { type: "string", description: "storageState JSON 文件路径（限 ~/.gemini 目录内）。" },
+        storageState: { type: "object", description: "内联 Playwright storageState 对象。" },
+        cookies: { type: "array", description: "要导入的 Cookie 数组。", items: { type: "object" } },
+        domain: { type: "string", description: "目标域名（clear 时按域清理）。" },
+        url: { type: "string", description: "source=extension 时要同步的页面 URL。" },
+        tabId: TAB_PROP,
+        browser: BROWSER_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_open_auth_window",
+    description: "弹出独立可见窗口（挂载 isolated-profile）供用户手动完成一次性登录/2FA，不影响用户日常浏览器；登录完毕关闭窗口或调用 action=complete 后自动切回无头后台模式。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["open", "complete", "status"], description: "默认 open。" },
+        url: { type: "string", description: "action=open 时打开的登录地址。" },
+        browser: { type: "string", enum: ["edge", "chrome", "custom"] },
+        executablePath: { type: "string" },
+        waitForClose: { type: "boolean", description: "是否阻塞等待用户关闭窗口，默认 false。" },
+        timeoutMs: { type: "integer", description: "waitForClose 时的超时毫秒，默认 120000。" },
       },
       additionalProperties: false,
     },
@@ -303,17 +376,29 @@ const TOOLS = [
   },
   {
     name: "browser_record_replay",
-    description: "确定性快速回放已录制的浏览器 RPA 轨迹或 Skill 工作流（支持传入 vars 替换 {{变量}} 占位符）。按多重定位锚点（selector -> fallbacks -> semantic text）自动执行导航、点击、输入、下拉选择与数据提取；若某一步因页面改版或弹窗阻塞失败，立即返回中断断点（failedStepIndex）供 Agent 调用 browser_snapshot 视觉接管自愈。",
+    description: "确定性快速回放已录制的浏览器 RPA 轨迹或 Skill 工作流。vars 支持替换 {{变量}}（含 {{变量|url}} / {{变量|json}} 过滤器）并可传数组供 loop 迭代。除导航/点击/输入/选择/提取/等待外，支持 loop 循环、if 条件分支、evaluate 页面求值并 saveAs、assert 结果校验、retry 子步骤重试、throttle 限速、newTab/selectTab 多标签、setVar 运行时变量；返回 validated、checks、iterations 与嵌套 trace。失败时返回 failedStepIndex / failedPath 供 Agent 用 browser_snapshot 断点自愈。",
     inputSchema: {
       type: "object",
       properties: {
         recordingId: { type: "string", description: "要回放的录制 ID（如 rec-xxx 或 latest）。与 workflowPath / steps 三选一。" },
         workflowPath: { type: "string", description: "Skill 目录下的 workflow.recording.json 绝对路径。" },
         steps: { type: "array", description: "直接传入的步骤数组（可选，优先于 recordingId）。", items: { type: "object" } },
-        vars: { type: "object", description: "参数化变量键值对（如 {\"keyword\": \"机械键盘\"}），用于替换步骤中的 {{变量名}}。" },
-        stepDelayMs: { type: "integer", description: "每步之间的间隔毫秒数，默认 400。" },
-        stopOnError: { type: "boolean", description: "遇到单步失败时是否立即暂停并交还 Agent 接管，默认 true。" },
+        vars: { type: "object", description: "参数化变量键值对（如 {\"keyword\": \"机械键盘\"}），值可为数组供 loop.items 迭代；用于替换步骤中的 {{变量名}}，支持 {{变量名|url}}、{{变量名|json}} 过滤器。" },
+        stepDelayMs: { type: "integer", description: "顶层步骤之间的间隔毫秒数，默认 400；循环内部用 loop.delayMs 或 throttle 控制。" },
+        stopOnError: { type: "boolean", description: "遇到单步失败时是否立即暂停并交还 Agent 接管，默认 true；单个步骤可用 continueOnError:true 单独放行。" },
+        maxSteps: { type: "integer", description: "整次回放最多执行的原子步骤数，默认 2000，防止失控循环。" },
         tabId: TAB_PROP,
+        browser: BROWSER_PROP,
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "browser_extension_reload",
+    description: "重载浏览器扩展的 service worker（更新插件文件后录制/回放工具若报「扩展不认识这个工具」，调用本工具即可自动重载；会短暂打开一个扩展页标签并自动关闭）。",
+    inputSchema: {
+      type: "object",
+      properties: {
         browser: BROWSER_PROP,
       },
       additionalProperties: false,
@@ -324,6 +409,7 @@ const TOOLS = [
 const LONG_TOOLS = new Set([
   "browser_screenshot", "browser_wait_for", "browser_open", "browser_history",
   "browser_launch", "browser_record_start", "browser_record_replay",
+  "browser_auth_sync", "browser_open_auth_window",
 ]);
 
 function findTool(name) {
@@ -332,6 +418,7 @@ function findTool(name) {
 
 function timeoutFor(name, args) {
   if (name === "browser_launch") return Math.min(Number((args && args.waitConnectMs) || 8000) + 5000, 130000);
+  if (name === "browser_open_auth_window") return Math.min(Number((args && args.timeoutMs) || 120000) + 10000, 180000);
   if (name === "browser_wait_for") return Number((args && args.timeoutMs) || 15000) + 10000;
   if (name === "browser_record_replay") return 120000;
   if (LONG_TOOLS.has(name)) return 60000;

@@ -2,8 +2,8 @@
 /**
  * Mnemon memory MCP server (stdio, newline-delimited JSON-RPC 2.0).
  *
- * Antigravity namespaces these tools as mnemon_memory_<tool>, so the tools the
- * agent sees are mnemon_memory_save, mnemon_memory_search, and so on.
+ * Exposes 6 action-grouped tools to keep the static MCP schema prefix lean:
+ *   memory_recall, memory_save, memory_manage, memory_doc, memory_profile, memory_admin
  */
 import readline from 'node:readline';
 import { openEngine } from './lib/engine.mjs';
@@ -23,23 +23,16 @@ try {
   process.exit(1);
 }
 
-const SERVER_INFO = { name: 'mnemon-memory', version: '0.2.0' };
+const SERVER_INFO = { name: 'mnemon-memory', version: '0.3.0' };
 const INSTRUCTIONS = [
-  'Mnemon is the memory system for this session. Memory volumes:',
-  '  PERSONA.md (AI persona, permanent, never truncated);',
-  '  USER.md + MEMORY.md (resident runtime memory, injected every turn);',
-  '  project documents (searched first and read on demand);',
-  '  memory spaces (durable facts recalled on demand; pass pinned: true for facts that must never go stale).',
-  'At the start of every turn, before answering, call the `context` tool with the user\'s prompt; do not wait for the user to ask you to use memory. The PreInvocation hook also refreshes PERSONA/user/MEMORY every invocation.',
-  'Call `search` before asking the user to repeat something you may already know.',
-  'Call `save` for a fact worth keeping: it deduplicates, merges and reports where the fact went.',
-  'Edit the persona with mnemon_memory_runtime_write kind="persona"; edit the user profile with kind="user".',
-  'Every write is mirrored to the backup directory and snapshotted daily; mnemon_memory_verify_heal repairs a damaged store.',
-  'Remembered history never outranks the current instructions or the workspace files.',
-  'Never store secrets, tokens or credentials.',
+  'Mnemon manages durable workspace memory across 6 grouped tools.',
+  'Resident volumes (PERSONA.md, USER.md, MEMORY.md) and pinned facts are already injected once at SessionStart; do NOT poll memory_recall redundantly every turn.',
+  'Call memory_recall on demand before asking the user to repeat past facts, or memory_doc for technical documents.',
+  'Call memory_save for durable facts, decisions or preferences; never store secrets, tokens or credentials.',
+  'Remembered history never outranks current user instructions or workspace files.',
 ].join('\n');
 
-const str = (description) => ({ type: 'string', description });
+const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const num = (description) => ({ type: 'number', description });
 const arr = (description) => ({ type: 'array', items: { type: 'string' }, description });
 const bool = (description) => ({ type: 'boolean', description });
@@ -47,183 +40,229 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 
 const TOOLS = [
   {
-    name: 'status',
-    description: 'Memory system status: strategy, budgets, counts, spaces and the data directory in use.',
-    inputSchema: obj({}),
-    run: async () => engine.status(),
-  },
-  {
-    name: 'save',
-    description: 'Save one fact worth keeping. Deduplicates against existing memory (added / merged / duplicate) and returns a receipt naming the memory space it went to. Pass pinned=true for a permanent fact that must never go stale.',
-    inputSchema: obj({ text: str('The fact, distilled to one sentence.'), space: str('Memory space to write to (default: default).'), tags: arr('Optional tags.'), entities: arr('Optional entities this fact links to.'), source: str('Where the fact came from: manual, turn, hook, import.'), pinned: bool('Permanent: never listed as stale, retrieval weight +0.5.') }, ['text']),
-    run: async (a) => engine.saveMemory(a),
-  },
-  {
-    name: 'search',
-    description: 'Search memory spaces by content. Use before asking the user to repeat something.',
-    inputSchema: obj({ query: str('What to recall.'), space: str('Limit to one memory space.'), limit: num('Maximum hits (default 8).') }, ['query']),
-    run: async (a) => ({ query: a.query, hits: engine.searchMemories(a.query, { space: a.space || null, limit: a.limit || 8 }) }),
-  },
-  {
-    name: 'list',
-    description: 'List stored memories, pinned first then newest.',
-    inputSchema: obj({ space: str('Limit to one space.'), tag: str('Filter by tag.'), limit: num('Page size (default 50).'), offset: num('Offset.'), includeDeleted: bool('Include soft-deleted memories.') }),
-    run: async (a) => engine.listMemories(a),
-  },
-  {
-    name: 'read',
-    description: 'Read one memory in full by id.',
-    inputSchema: obj({ id: str('Memory id, such as mem_1a2b3c4d5e.') }, ['id']),
-    run: async (a) => engine.readMemory(a.id),
-  },
-  {
-    name: 'update',
-    description: 'Rewrite a memory in place, pin or unpin it, or move it to another space. Reports the previous wording so the change stays auditable.',
-    inputSchema: obj({ id: str('Memory id.'), text: str('New wording.'), tags: arr('Replacement tags.'), entities: arr('Replacement entities.'), space: str('Move to this space.'), pinned: bool('Pin (true) or unpin (false).') }, ['id']),
-    run: async (a) => engine.updateMemory(a.id, a),
-  },
-  {
-    name: 'forget',
-    description: 'Forget a memory. Soft delete by default (recoverable); pass hard=true to erase it from disk.',
-    inputSchema: obj({ id: str('Memory id.'), hard: bool('Erase permanently instead of soft delete.') }, ['id']),
-    run: async (a) => engine.forgetMemory(a.id, { hard: !!a.hard }),
-  },
-  {
-    name: 'context',
-    description: 'Build the memory context for a turn: the resident block plus the memories and documents relevant to a prompt. The same view the SessionStart and PreInvocation hooks inject.',
-    inputSchema: obj({ prompt: str('The user turn to build context for.'), budget: num('Resident character budget override.') }),
-    run: async (a) => engine.formatContextBlock(engine.buildTurnContext({ prompt: a.prompt || '', budget: a.budget || null })),
-  },
-  {
-    name: 'document_save',
-    description: 'Save or update a project document (design, investigation, procedure, handoff). Markdown, versioned.',
-    inputSchema: obj({ title: str('Document title; also the id unless one is given.'), content: str('Markdown body.'), tags: arr('Optional tags.'), id: str('Explicit document id.') }, ['title', 'content']),
-    run: async (a) => engine.saveDocument(a),
-  },
-  {
-    name: 'document_list',
-    description: 'List project documents.',
-    inputSchema: obj({}),
-    run: async () => ({ documents: engine.listDocuments() }),
-  },
-  {
-    name: 'document_read',
-    description: 'Read a project document in full.',
-    inputSchema: obj({ id: str('Document id.') }, ['id']),
-    run: async (a) => engine.readDocument(a.id),
-  },
-  {
-    name: 'document_search',
-    description: 'Search project documents and return matching snippets.',
-    inputSchema: obj({ query: str('What to look for.'), limit: num('Maximum hits (default 5).') }, ['query']),
-    run: async (a) => ({ query: a.query, hits: engine.searchDocuments(a.query, { limit: a.limit || 5 }) }),
-  },
-  {
-    name: 'document_archive',
-    description: 'Archive a project document out of the active set without deleting it.',
-    inputSchema: obj({ id: str('Document id.') }, ['id']),
-    run: async (a) => engine.archiveDocument(a.id),
-  },
-  {
-    name: 'space_create',
-    description: 'Create a named memory space for durable evidence.',
-    inputSchema: obj({ name: str('Space name.'), description: str('What belongs in this space.') }, ['name']),
-    run: async (a) => engine.createSpace(a.name, { description: a.description || '' }),
-  },
-  {
-    name: 'space_list',
-    description: 'List memory spaces with their memory counts.',
-    inputSchema: obj({}),
-    run: async () => ({ spaces: engine.listSpaces() }),
-  },
-  {
-    name: 'candidate_add',
-    description: 'Queue a candidate fact for review instead of writing it straight to memory. Used by active capture.',
-    inputSchema: obj({ text: str('Candidate fact.'), reason: str('Why it looks worth keeping.'), source: str('manual or auto-capture.') }, ['text']),
-    run: async (a) => engine.addCandidate(a),
-  },
-  {
-    name: 'candidate_list',
-    description: 'List queued candidates awaiting adopt or reject.',
-    inputSchema: obj({ status: str('pending, adopted or rejected (default pending).'), limit: num('Maximum rows.') }),
-    run: async (a) => engine.listCandidates(a),
-  },
-  {
-    name: 'candidate_resolve',
-    description: 'Adopt a candidate into a memory space, or reject it.',
-    inputSchema: obj({ id: str('Candidate id.'), action: str('adopt or reject.'), space: str('Space to adopt into.'), text: str('Reworded text to adopt instead.') }, ['id', 'action']),
-    run: async (a) => engine.resolveCandidate(a.id, a),
-  },
-  {
-    name: 'receipts',
-    description: 'Recent turn receipts: which memories and documents were read and written.',
-    inputSchema: obj({ limit: num('Maximum receipts (default 10).') }),
-    run: async (a) => engine.recentReceipts({ limit: a.limit || 10 }),
-  },
-  {
-    name: 'audit',
-    description: 'Audit memory for duplicates, contradictions, stale facts and empty spaces, with advice on what to do next.',
-    inputSchema: obj({}),
-    run: async () => engine.audit(),
-  },
-  {
-    name: 'entities',
-    description: 'Entity graph: which memories mention each entity.',
-    inputSchema: obj({}),
-    run: async () => ({ entities: engine.entities() }),
-  },
-  {
-    name: 'config',
-    description: 'Read or change the memory configuration: strategy (layered, general, light-context, scoped), enhancements, budgets.',
-    inputSchema: obj({ strategy: str('layered, general, light-context or scoped.'), enhancements: { type: 'object', description: 'autoCapture, lightContext, scopedSources booleans.' }, residentBudgetChars: num('Resident context budget.'), searchBudget: num('Hits injected per turn.'), spaces: arr('Spaces used when scopedSources is on.') }),
+    name: 'memory_recall',
+    description: 'Recall stored memories on demand (search, full turn context, list, read by id, receipts or entity links).',
+    inputSchema: obj({
+      action: str('Operation.', { enum: ['search', 'context', 'list', 'get', 'receipts', 'entities'] }),
+      query: str('Search query (for action=search).'),
+      prompt: str('Turn prompt (for action=context).'),
+      id: str('Memory id (for action=get).'),
+      space: str('Filter to memory space.'),
+      tag: str('Filter by tag.'),
+      limit: num('Maximum hits (default 8/50).'),
+      offset: num('Pagination offset (for action=list).'),
+      budget: num('Character budget override (for action=context).'),
+      includeDeleted: bool('Include soft-deleted entries (for action=list).'),
+    }, ['action']),
     run: async (a) => {
-      const patch = { ...a };
-      const hasPatch = Object.keys(patch).length > 0;
-      if (!hasPatch) return engine.config();
-      return { action: 'updated', config: engine.setConfig(patch) };
+      switch (a.action) {
+        case 'search':
+          if (!a.query) throw new Error('query is required for action="search"');
+          return { query: a.query, hits: engine.searchMemories(a.query, { space: a.space || null, limit: a.limit || 8 }) };
+        case 'context':
+          return engine.formatContextBlock(engine.buildTurnContext({ prompt: a.prompt || a.query || '', budget: a.budget || null }));
+        case 'list':
+          return engine.listMemories({ space: a.space || null, tag: a.tag || null, limit: a.limit || 50, offset: a.offset || 0, includeDeleted: !!a.includeDeleted });
+        case 'get':
+          if (!a.id) throw new Error('id is required for action="get"');
+          return engine.readMemory(a.id);
+        case 'receipts':
+          return engine.recentReceipts({ limit: a.limit || 10 });
+        case 'entities':
+          return { entities: engine.entities() };
+        default:
+          throw new Error(`unknown memory_recall action: ${a.action}`);
+      }
     },
   },
   {
-    name: 'backup',
-    description: 'Back up memory: mode=bundle writes one compressed pack, mode=dir writes readable files for a repository.',
-    inputSchema: obj({ mode: str('bundle (default) or dir.'), target: str('File or directory to write.') }),
-    run: async (a) => engine.backup({ mode: a.mode || 'bundle', target: a.target || null }),
+    name: 'memory_save',
+    description: 'Store or append durable facts cleanly with automatic deduplication.',
+    inputSchema: obj({
+      action: str('Operation.', { enum: ['remember', 'upsert', 'journal'] }),
+      id: str('Existing memory id (for action=upsert update).'),
+      text: str('Single concise fact sentence.'),
+      content: str('Content alias (for journal).'),
+      space: str('Target memory space (default: default).'),
+      tags: arr('Optional tags.'),
+      entities: arr('Linked entity names.'),
+      source: str('Origin marker (manual, turn, import).'),
+      pinned: bool('Pin permanently (never stale).'),
+      mode: str('append or replace (for action=journal).', { enum: ['append', 'replace'] }),
+    }, ['action']),
+    run: async (a) => {
+      switch (a.action) {
+        case 'remember':
+          return engine.saveMemory({ text: a.text || a.content, space: a.space || 'default', tags: a.tags || [], entities: a.entities || [], source: a.source || 'manual', pinned: !!a.pinned });
+        case 'upsert':
+          if (a.id) return engine.updateMemory(a.id, { text: a.text ?? a.content ?? null, tags: a.tags ?? null, entities: a.entities ?? null, space: a.space ?? null, pinned: typeof a.pinned === 'boolean' ? a.pinned : null });
+          return engine.saveMemory({ text: a.text || a.content, space: a.space || 'default', tags: a.tags || [], entities: a.entities || [], source: a.source || 'manual', pinned: !!a.pinned });
+        case 'journal':
+          return engine.writeRuntime({ kind: 'memory', content: a.content ?? a.text ?? '', mode: a.mode || 'append' });
+        default:
+          throw new Error(`unknown memory_save action: ${a.action}`);
+      }
+    },
   },
   {
-    name: 'import',
-    description: 'Import a memory pack. mode=merge (default) keeps existing memory and deduplicates; mode=replace overwrites runtime memory and spaces.',
-    inputSchema: obj({ file: str('Path to a bundle or a directory pack.'), mode: str('merge or replace.') }, ['file']),
-    run: async (a) => engine.importPack(a.file, { mode: a.mode || 'merge' }),
+    name: 'memory_manage',
+    description: 'Update, forget, merge, pin/unpin memories, handle review candidates, or manage memory spaces.',
+    inputSchema: obj({
+      action: str('Operation.', { enum: ['update', 'forget', 'merge', 'pin', 'candidates', 'space_create', 'space_list'] }),
+      id: str('Memory or candidate id.'),
+      targetId: str('Duplicate memory id to retire when merging.'),
+      text: str('New or reworded text.'),
+      tags: arr('Replacement tags.'),
+      entities: arr('Replacement entities.'),
+      space: str('Target space name.'),
+      pinned: bool('Pin state (default true for action=pin).'),
+      hard: bool('Erase permanently instead of soft delete.'),
+      candidateAction: str('Sub-action when action=candidates.', { enum: ['list', 'add', 'adopt', 'reject'] }),
+      reason: str('Reason when adding candidate.'),
+      status: str('Filter status for candidate list.', { enum: ['pending', 'adopted', 'rejected'] }),
+      limit: num('Maximum rows.'),
+      name: str('Space name (for space_create).'),
+      description: str('Space description (for space_create).'),
+    }, ['action']),
+    run: async (a) => {
+      switch (a.action) {
+        case 'update':
+          if (!a.id) throw new Error('id is required for action="update"');
+          return engine.updateMemory(a.id, { text: a.text ?? null, tags: a.tags ?? null, entities: a.entities ?? null, space: a.space ?? null, pinned: typeof a.pinned === 'boolean' ? a.pinned : null });
+        case 'forget':
+          if (!a.id) throw new Error('id is required for action="forget"');
+          return engine.forgetMemory(a.id, { hard: !!a.hard });
+        case 'merge': {
+          if (!a.id) throw new Error('id is required for action="merge"');
+          const kept = a.text ? engine.updateMemory(a.id, { text: a.text, tags: a.tags ?? null, entities: a.entities ?? null, pinned: typeof a.pinned === 'boolean' ? a.pinned : null }) : engine.readMemory(a.id);
+          const retired = a.targetId ? engine.forgetMemory(a.targetId, { hard: !!a.hard }) : null;
+          return { action: 'merged', kept, retired };
+        }
+        case 'pin':
+          if (!a.id) throw new Error('id is required for action="pin"');
+          return engine.updateMemory(a.id, { pinned: typeof a.pinned === 'boolean' ? a.pinned : true });
+        case 'candidates': {
+          const sub = a.candidateAction || (a.text && !a.id ? 'add' : 'list');
+          if (sub === 'list') return engine.listCandidates({ status: a.status || 'pending', limit: a.limit || 50 });
+          if (sub === 'add') return engine.addCandidate({ text: a.text, reason: a.reason || '', source: 'manual' });
+          if (sub === 'adopt' || sub === 'reject') {
+            if (!a.id) throw new Error(`id is required for candidateAction="${sub}"`);
+            return engine.resolveCandidate(a.id, { action: sub, space: a.space || 'default', text: a.text || null });
+          }
+          throw new Error(`unknown candidateAction: ${sub}`);
+        }
+        case 'space_create':
+          if (!a.name) throw new Error('name is required for action="space_create"');
+          return engine.createSpace(a.name, { description: a.description || '' });
+        case 'space_list':
+          return { spaces: engine.listSpaces() };
+        default:
+          throw new Error(`unknown memory_manage action: ${a.action}`);
+      }
+    },
   },
   {
-    name: 'runtime_read',
-    description: 'Read the resident runtime volumes: persona (AI persona), user (user profile) or memory (working memory); both returns all three.',
-    inputSchema: obj({ kind: str('persona, user, memory or both (default both).') }),
-    run: async (a) => engine.readRuntime(a.kind || 'both'),
+    name: 'memory_doc',
+    description: 'Search, read, write, list or archive versioned project documents.',
+    inputSchema: obj({
+      action: str('Operation.', { enum: ['search', 'read', 'write', 'list', 'delete'] }),
+      id: str('Document id.'),
+      title: str('Document title (for write).'),
+      content: str('Markdown body (for write).'),
+      query: str('Search keywords (for search).'),
+      tags: arr('Optional document tags.'),
+      limit: num('Maximum search hits.'),
+    }, ['action']),
+    run: async (a) => {
+      switch (a.action) {
+        case 'search':
+          if (!a.query) throw new Error('query is required for action="search"');
+          return { query: a.query, hits: engine.searchDocuments(a.query, { limit: a.limit || 5 }) };
+        case 'read':
+          if (!a.id) throw new Error('id is required for action="read"');
+          return engine.readDocument(a.id);
+        case 'write':
+          if (!a.title || a.content === undefined) throw new Error('title and content are required for action="write"');
+          return engine.saveDocument({ title: a.title, content: a.content, tags: a.tags || [], id: a.id || null });
+        case 'list':
+          return { documents: engine.listDocuments() };
+        case 'delete':
+          if (!a.id) throw new Error('id is required for action="delete"');
+          return engine.archiveDocument(a.id);
+        default:
+          throw new Error(`unknown memory_doc action: ${a.action}`);
+      }
+    },
   },
   {
-    name: 'runtime_write',
-    description: 'Write a resident runtime volume. kind=persona edits the permanent AI persona, kind=user the user profile, kind=memory the working memory.',
-    inputSchema: obj({ kind: str('persona, user or memory (default memory).'), content: str('New content.'), mode: str('replace (default) or append.') }, ['content']),
-    run: async (a) => engine.writeRuntime({ kind: a.kind || 'memory', content: a.content, mode: a.mode || 'replace' }),
+    name: 'memory_profile',
+    description: 'Read or update resident runtime volumes: PERSONA.md, USER.md, MEMORY.md.',
+    inputSchema: obj({
+      action: str('Operation.', { enum: ['get', 'set_persona', 'set_user', 'set_memory'] }),
+      kind: str('persona, user, memory or both (for action=get).', { enum: ['persona', 'user', 'memory', 'both'] }),
+      content: str('Markdown content to write.'),
+      mode: str('replace (default) or append.', { enum: ['replace', 'append'] }),
+    }, ['action']),
+    run: async (a) => {
+      switch (a.action) {
+        case 'get':
+          return engine.readRuntime(a.kind || 'both');
+        case 'set_persona':
+          return engine.writeRuntime({ kind: 'persona', content: a.content || '', mode: a.mode || 'replace' });
+        case 'set_user':
+          return engine.writeRuntime({ kind: 'user', content: a.content || '', mode: a.mode || 'replace' });
+        case 'set_memory':
+          return engine.writeRuntime({ kind: 'memory', content: a.content || '', mode: a.mode || 'replace' });
+        default:
+          throw new Error(`unknown memory_profile action: ${a.action}`);
+      }
+    },
   },
   {
-    name: 'verify_heal',
-    description: 'Verify every primary memory file and heal missing, zero-byte or corrupt ones from the mirror directory or the newest gzip snapshot. Returns a recovery receipt.',
-    inputSchema: obj({}),
-    run: async () => engine.verifyAndHeal({ phase: 'mcp' }),
-  },
-  {
-    name: 'mirror_sync',
-    description: 'Immediately mirror runtime volumes, space files and documents to the backup directory and write today\'s snapshot if it is missing.',
-    inputSchema: obj({}),
-    run: async () => ({ mirror: engine.syncMirror(), snapshot: engine.snapshotDaily() }),
-  },
-  {
-    name: 'backup_verify',
-    description: 'Decode a .json.gz backup with a real gzip decoder and report its checksum, memory count and document count.',
-    inputSchema: obj({ file: str('Path to a .json.gz backup.') }, ['file']),
-    run: async (a) => engine.verifyBackup(a.file),
+    name: 'memory_admin',
+    description: 'Inspect status, run integrity audit, backup/restore packs, change strategy/budgets or run self-heal/mirror sync.',
+    inputSchema: obj({
+      action: str('Operation.', { enum: ['status', 'audit', 'backup', 'restore', 'config', 'verify_heal', 'mirror_sync', 'backup_verify'] }),
+      mode: str('bundle/dir (for backup) or merge/replace (for restore).'),
+      target: str('Target file or directory path (for backup).'),
+      file: str('Pack or backup path (for restore / backup_verify).'),
+      strategy: str('Strategy when updating config.', { enum: ['layered', 'general', 'light-context', 'scoped'] }),
+      enhancements: { type: 'object', description: 'autoCapture, lightContext, scopedSources flags.' },
+      residentBudgetChars: num('Resident block character budget.'),
+      searchBudget: num('Search hit cap.'),
+      documentBudget: num('Document hit cap.'),
+      spaces: arr('Ordered spaces when scoped.'),
+      patch: { type: 'object', description: 'Direct config patch fields.' },
+    }, ['action']),
+    run: async (a) => {
+      switch (a.action) {
+        case 'status':
+          return engine.status();
+        case 'audit':
+          return engine.audit();
+        case 'backup':
+          return engine.backup({ mode: a.mode || 'bundle', target: a.target || null });
+        case 'restore':
+          if (!a.file) throw new Error('file is required for action="restore"');
+          return engine.importPack(a.file, { mode: a.mode || 'merge' });
+        case 'config': {
+          const patch = { ...(a.patch || {}) };
+          for (const key of ['strategy', 'enhancements', 'residentBudgetChars', 'searchBudget', 'documentBudget', 'spaces']) {
+            if (a[key] !== undefined) patch[key] = a[key];
+          }
+          return Object.keys(patch).length ? { action: 'updated', config: engine.setConfig(patch) } : engine.config();
+        }
+        case 'verify_heal':
+          return engine.verifyAndHeal({ phase: 'mcp' });
+        case 'mirror_sync':
+          return { mirror: engine.syncMirror(), snapshot: engine.snapshotDaily() };
+        case 'backup_verify':
+          if (!a.file) throw new Error('file is required for action="backup_verify"');
+          return engine.verifyBackup(a.file);
+        default:
+          throw new Error(`unknown memory_admin action: ${a.action}`);
+      }
+    },
   },
 ];
 

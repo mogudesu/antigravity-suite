@@ -146,7 +146,11 @@ async function ensureLeaseGroup(tabId) {
       }
       groupId = target != null
         ? await chrome.tabs.group({ groupId: target, tabIds: [tab.id] })
-        : await chrome.tabs.group({ tabIds: [tab.id] });
+        // createProperties.windowId is required: without it chrome.tabs.group
+        // creates the group in the last-focused window and MOVES this tab out of
+        // the dedicated background window (which then closes empty), defeating
+        // the non-intrusive design and leaving the tab inactive (no screenshot).
+        : await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId } });
     }
     await chrome.tabGroups.update(groupId, {
       title: LEASE_GROUP_TITLE,
@@ -167,32 +171,64 @@ async function ensureLeaseTab(url = "about:blank") {
   }
   if (leaseCreating) return leaseCreating;
   leaseCreating = (async () => {
-    const active = await getActiveTab();
-    let windowId = active && active.windowId;
-    if (!windowId) {
-      const last = await chrome.windows.getLastFocused().catch(() => null);
-      windowId = last && last.id;
-    }
-    const props = { url, active: true };
-    if (windowId) props.windowId = windowId;
-    const tab = await chrome.tabs.create(props);
-    await persistLease(tab.id, tab.windowId);
-    await ensureLeaseGroup(tab.id);
-    return tab;
+    // Dedicated non-focused window: the lease tab is active inside it (real
+    // screenshot surface) while the user's focused window/tab stay untouched.
+    const win = await chrome.windows.create({ url, focused: false, type: "normal" });
+    const created = win && win.tabs && win.tabs[0];
+    if (!created) throw new Error("无法创建代理后台窗口");
+    await persistLease(created.id, win.id);
+    await ensureLeaseGroup(created.id);
+    return chrome.tabs.get(created.id);
   })().finally(() => { leaseCreating = null; });
   return leaseCreating;
+}
+
+/**
+ * 控制动作开始前，记录用户正在使用的窗口（排除代理后台窗口）。
+ * chrome.tabs.create({ active: true }) 在部分 Chrome/Windows 组合下会把目标
+ * 窗口一起前置、抢走用户焦点，所以要能在动作结束后把焦点还回去。
+ */
+async function focusedUserWindowId(excludeWindowId) {
+  try {
+    const wins = await chrome.windows.getAll({ windowTypes: ["normal"] });
+    const w = wins.find((x) => x.focused && x.id !== excludeWindowId);
+    return w ? w.id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 仅当代理窗口真的抢到焦点时才恢复，避免多余的窗口操作（标签在后台窗口内仍 active，截图 surface 不受影响）。 */
+async function restoreUserFocus(userWindowId, leaseWindowId) {
+  if (userWindowId == null) return;
+  try {
+    const wins = await chrome.windows.getAll({ windowTypes: ["normal"] });
+    const now = wins.find((x) => x.focused);
+    if (!now || now.id === userWindowId) return;
+    // 焦点是被别的应用/窗口拿走时不强行抢回，只有代理窗口自己抢走才恢复。
+    if (leaseWindowId != null && now.id !== leaseWindowId) return;
+    await chrome.windows.update(userWindowId, { focused: true });
+  } catch (e) {
+    /* 焦点恢复是尽力而为，失败不阻断控制；下一次动作会再试 */
+  }
 }
 
 async function createLeaseTab(url = "about:blank") {
   const lease = await getLeaseTab();
   if (!lease) return ensureLeaseTab(url);
+  const userWindowId = await focusedUserWindowId(lease.windowId);
+  // 先以 active:false 建标签，再在后台窗口内 update 激活：既保证 CDP 截图所需
+  // 的窗口内 active surface，又避开 tabs.create({active:true}) 的前置窗口行为。
   const tab = await chrome.tabs.create({
     windowId: lease.windowId,
     url,
-    active: true,
+    active: false,
   });
+  await chrome.tabs.update(tab.id, { active: true });
   await persistLease(tab.id, tab.windowId);
   await ensureLeaseGroup(tab.id);
+  // 兜底：某些平台仍可能把后台窗口前置，把焦点还给用户窗口。
+  await restoreUserFocus(userWindowId, lease.windowId);
   return tab;
 }
 
@@ -447,6 +483,8 @@ function connect() {
       t: "hello",
       browser: detectBrowser(),
       version: chrome.runtime.getManifest().version,
+      id: chrome.runtime.id,
+      features: ["record", "recordReplay"],
       token: settings.token || undefined,
       ua: navigator.userAgent,
     });
@@ -749,7 +787,7 @@ const HANDLERS = {
       leaseGroup,
       leaseCursor,
       cdpAttachedTabs: Cdp.attachedTabIds(),
-      note: "所有控制类工具默认作用于扩展自己的 leaseTab：它在当前窗口内以「谷谷嘎嘎控制中」标签组打开并激活，页面内常驻可见鼠标，不会改写用户原标签页；需要指定其他标签时显式传 tabId。首次控制会附加 CDP 以显示浏览器原生调试提示条。",
+      note: "所有控制类工具默认作用于扩展自己的 leaseTab：它在专属后台窗口（创建时不抢焦点）内以「谷谷嘎嘎控制中」标签组打开、并在该窗口内激活，用户当前窗口与标签保持不变；常驻鼠标与原生调试提示条只在该后台页显示，默认不打扰用户。需要指定其他标签时显式传 tabId；browser_tabs activate 可显式前台化。首次控制会附加 CDP 以显示浏览器原生调试提示条。",
     };
   },
 
@@ -796,8 +834,8 @@ const HANDLERS = {
     }
     if (action === "new") {
       const url = normalizeUrl(args.url || "about:blank");
-      // A new grouped agent tab in the current window: visible to the user,
-      // active for a real screenshot surface, and never reuses the user's tab.
+      // A new grouped agent tab in the dedicated background window: active
+      // inside it for a real screenshot surface, never focused over the user.
       const t = await createLeaseTab(url);
       await waitComplete(t.id, 8000);
       await setControlTab(t.id);
@@ -815,8 +853,8 @@ const HANDLERS = {
     if (!args.url) throw new Error("browser_open 需要 url 参数");
     const url = normalizeUrl(args.url);
     if (args.newTab) {
-      // A new grouped agent tab in the current window: visible to the user,
-      // active for a real screenshot surface, and never reuses the user's tab.
+      // A new grouped agent tab in the dedicated background window: active
+      // inside it for a real screenshot surface, never focused over the user.
       const t = await createLeaseTab(url);
       await waitComplete(t.id, 20000);
       const after = await chrome.tabs.get(t.id);
@@ -1004,11 +1042,33 @@ const HANDLERS = {
   async browser_scroll(args) {
     const tab = await getControlTab(args);
     let dx = args.deltaX, dy = args.deltaY;
+    const hasExplicitScroll = dx != null || dy != null || args.direction != null || args.amount != null;
     if (dx == null && dy == null) {
       const amount = Number(args.amount || 800);
       const dir = args.direction || "down";
       dy = dir === "up" ? -amount : dir === "down" ? amount : 0;
       dx = dir === "left" ? -amount : dir === "right" ? amount : 0;
+    }
+    if (args.ref || args.selector || args.text) {
+      const info = await pa(tab.id, "locate", { ref: args.ref, selector: args.selector, fallbacks: args.fallbacks, text: args.text, nth: args.nth });
+      if (!info.ok) return info;
+      if (hasExplicitScroll) {
+        const containerScroll = await pa(tab.id, "scrollJs", { ref: args.ref, selector: args.selector, text: args.text, deltaX: dx || 0, deltaY: dy || 0 });
+        if (containerScroll && containerScroll.container) {
+          return Object.assign({ tabId: tab.id, deltaX: dx || 0, deltaY: dy || 0 }, containerScroll);
+        }
+        try {
+          await Cdp.attach(tab.id);
+          await showCursor(tab.id, { x: info.x, y: info.y, action: "scroll" });
+          await Cdp.wheel(tab.id, info.x, info.y, dx, dy);
+          await sleep(120);
+          const after = await Cdp.evaluate(tab.id, "JSON.stringify({scrollY: Math.round(scrollY), scrollHeight: document.documentElement.scrollHeight, innerHeight: innerHeight})");
+          return Object.assign({ ok: true, engine: "cdp", tabId: tab.id, target: info, deltaX: dx || 0, deltaY: dy || 0 }, JSON.parse(after.value));
+        } catch (e) {
+          return Object.assign({ tabId: tab.id, fallbackReason: (e && e.message) || String(e) }, containerScroll);
+        }
+      }
+      return Object.assign({ tabId: tab.id, target: info }, await pa(tab.id, "scrollJs", { ref: args.ref, selector: args.selector, text: args.text }));
     }
     try {
       await Cdp.attach(tab.id);
@@ -1076,6 +1136,33 @@ const HANDLERS = {
     };
   },
 
+  async browser_get_cookies(args) {
+    const tab = await getControlTab(args);
+    const targetUrl = args.url || tab.url;
+    await Cdp.attach(tab.id);
+    const res = await Cdp.send(tab.id, "Network.getCookies", targetUrl ? { urls: [targetUrl] } : {});
+    let cookies = (res && res.cookies) || [];
+    if (args.domain) {
+      const want = String(args.domain).toLowerCase();
+      cookies = cookies.filter((c) => String(c.domain || "").toLowerCase().includes(want));
+    }
+    return {
+      ok: true,
+      tabId: tab.id,
+      url: targetUrl,
+      cookies: cookies.map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path || "/",
+        expires: c.expires,
+        httpOnly: !!c.httpOnly,
+        secure: !!c.secure,
+        sameSite: c.sameSite || "Lax",
+      })),
+    };
+  },
+
   async browser_network(args) {
     const tab = await getControlTab(args);
     const buf = logs.get(tab.id) || { console: [], network: [] };
@@ -1122,144 +1209,373 @@ const HANDLERS = {
     }
     const stopOnError = args.stopOnError !== false;
     const stepDelayMs = Math.max(50, Math.min(Number(args.stepDelayMs || 400), 10000));
-    let tab = await getControlTab(args);
-    const trace = [];
-    const extractedData = {};
-    let completedCount = 0;
+    const maxSteps = Math.max(1, Math.min(Number(args.maxSteps || 2000), 10000));
 
-    function buildTarget(loc) {
+    const ctx = {
+      vars: Object.assign({}, (args && args.vars) || {}),
+      tab: await getControlTab(args),
+      trace: [],
+      checks: [],
+      extractedData: {},
+      completedCount: 0,
+      iterations: 0,
+      stepsExecuted: 0,
+      lastActionAt: 0,
+    };
+
+    class ReplayFailure extends Error {
+      constructor(message, path, step) {
+        super(message);
+        this.path = path;
+        this.step = step;
+      }
+    }
+
+    // 运行时插值：解析 loop 变量、evaluate/saveAs、setVar 产生的变量。
+    // 服务端已做过一次静态 vars 替换；未命中的 {{key}} 原样留给后续阶段。
+    function applyFilter(v, filter) {
+      switch (filter) {
+        case "url":
+        case "encodeURIComponent": return encodeURIComponent(String(v));
+        case "json": return JSON.stringify(v);
+        case "upper": return String(v).toUpperCase();
+        case "lower": return String(v).toLowerCase();
+        case "trim": return String(v).trim();
+        default: return typeof v === "object" ? JSON.stringify(v) : String(v);
+      }
+    }
+    function rt(value) {
+      if (typeof value === "string") {
+        return value.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*(?:\|\s*([a-zA-Z0-9_]+)\s*)?\}\}/g, (whole, key, filter) => {
+          const v = ctx.vars[key];
+          if (v === undefined || v === null) return whole;
+          return applyFilter(v, filter);
+        });
+      }
+      if (Array.isArray(value)) return value.map(rt);
+      if (value && typeof value === "object") {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) out[k] = rt(v);
+        return out;
+      }
+      return value;
+    }
+    // 子步骤字段留给递归执行时再插值，避免嵌套 loop 被外层变量提前替换。
+    function rtStep(s) {
+      const out = {};
+      for (const [k, v] of Object.entries(s || {})) {
+        out[k] = (k === "steps" || k === "then" || k === "else") ? v : rt(v);
+      }
+      return out;
+    }
+    function buildTarget(loc, s) {
       loc = loc || {};
+      s = s || {};
       const sem = loc.semantic || {};
+      const fallbacks = Array.isArray(loc.fallbacks)
+        ? loc.fallbacks
+        : (Array.isArray(s.fallbacks) ? s.fallbacks : undefined);
       return {
-        selector: loc.selector || undefined,
-        fallbacks: Array.isArray(loc.fallbacks) ? loc.fallbacks : undefined,
+        // 兼容录制格式 locator.selector 与手写 workflow 的顶层 selector。
+        selector: loc.selector || s.selector || undefined,
+        fallbacks,
         text: sem.text || sem.name || undefined,
       };
     }
-
-    for (let i = 0; i < steps.length; i++) {
-      const s = steps[i] || {};
-      const type = s.type;
-      let res = { ok: true };
-      try {
-        if (type === "navigate") {
-          if (s.url) {
-            res = await HANDLERS.browser_open({ url: s.url, tabId: tab.id });
-            if (res && res.tabId) tab = await getTab({ tabId: res.tabId });
-          }
-        } else if (type === "click") {
-          const t = buildTarget(s.locator);
-          res = await HANDLERS.browser_click(Object.assign({ tabId: tab.id }, t));
-          await waitComplete(tab.id, 5000);
-        } else if (type === "type") {
-          if (s.sensitive === "password" || s.value === "[REDACTED_PASSWORD]") {
-            res = { ok: true, skipped: "password-redacted", note: "密码框步骤已跳过写入，复用浏览器已有登录态" };
-          } else {
-            const t = buildTarget(s.locator);
-            res = await HANDLERS.browser_type({
-              tabId: tab.id,
-              selector: t.selector,
-              fallbacks: t.fallbacks,
-              text: String(s.value == null ? "" : s.value),
-              clear: s.clear !== false,
-              submit: !!s.submit,
-            });
-            if (s.submit) await waitComplete(tab.id, 6000);
-          }
-        } else if (type === "select") {
-          const t = buildTarget(s.locator);
-          res = await HANDLERS.browser_select_option({
-            tabId: tab.id,
-            selector: t.selector,
-            fallbacks: t.fallbacks,
-            value: s.value,
-            label: s.label,
-          });
-        } else if (type === "press") {
-          const t = buildTarget(s.locator);
-          res = await HANDLERS.browser_press({
-            tabId: tab.id,
-            key: s.key || "Enter",
-            selector: t.selector,
-          });
-          if (s.key === "Enter") await waitComplete(tab.id, 5000);
-        } else if (type === "scroll") {
-          res = await HANDLERS.browser_scroll({
-            tabId: tab.id,
-            deltaY: s.deltaY,
-            direction: s.direction || "down",
-            amount: s.amount || 600,
-          });
-        } else if (type === "extract") {
-          const t = buildTarget(s.locator);
-          res = await pa(tab.id, "extractData", {
-            listSelector: s.listSelector,
-            selector: t.selector,
-            fallbacks: t.fallbacks,
-            text: t.text,
-            maxItems: s.maxItems || 30,
-          });
-          if (res && res.ok) {
-            const key = s.field || ("extract_step_" + (s.index || (i + 1)));
-            extractedData[key] = res.mode === "list" ? res.items : res.text;
-          }
-        } else if (type === "wait") {
-          if (s.selector || s.text) {
-            res = await HANDLERS.browser_wait_for({ tabId: tab.id, selector: s.selector, text: s.text, timeoutMs: s.timeoutMs || 10000 });
-          } else {
-            await sleep(Number(s.ms || 1000));
-            res = { ok: true, waitedMs: Number(s.ms || 1000) };
-          }
-        } else if (type === "note") {
-          res = { ok: true, userNote: s.note };
-        }
-      } catch (e) {
-        res = { ok: false, error: (e && e.message) || String(e) };
-      }
-
-      const stepOk = !!(res && res.ok !== false);
-      trace.push({
-        stepIndex: i,
+    async function evalExpr(expression) {
+      const r = await HANDLERS.browser_evaluate({ tabId: ctx.tab.id, expression: rt(expression) });
+      if (!r || r.ok === false) throw new Error("页面求值失败：" + ((r && r.error) || "未知错误"));
+      return r.value;
+    }
+    function childSteps(v) { return Array.isArray(v) ? v : []; }
+    function record(path, type, ok, extra) {
+      ctx.trace.push(Object.assign({
+        path,
+        stepIndex: path.length ? path[0] : 0,
         type,
-        ok: stepOk,
-        userNote: s.userNote || s.note || undefined,
-        error: stepOk ? undefined : (res && res.error) || "步骤执行未成功",
-      });
-
-      if (!stepOk && stopOnError) {
-        let curTab = tab;
-        try { curTab = await chrome.tabs.get(tab.id); } catch (e) { /* ignore */ }
-        return {
-          ok: false,
-          tabId: tab.id,
-          currentUrl: curTab && curTab.url,
-          currentTitle: curTab && curTab.title,
-          completedCount,
-          totalSteps: steps.length,
-          failedStepIndex: i,
-          failedStep: s,
-          error: (res && res.error) || ("第 " + (i + 1) + " 步 (" + type + ") 回放未命中目标元素"),
-          extractedData,
-          trace,
-          selfHealHint: "确定性 RPA 回放在第 " + (i + 1) + " 步中断。请调用 browser_snapshot 获取当前页面的最新 ref 结构，按照业务意图手动完成该步及后续步骤。",
-        };
-      }
-
-      if (stepOk) completedCount++;
-      if (i < steps.length - 1) await sleep(stepDelayMs);
+        ok,
+      }, extra || {}));
     }
 
-    let finalTab = tab;
-    try { finalTab = await chrome.tabs.get(tab.id); } catch (e) { /* ignore */ }
+    async function runSteps(list, pathPrefix) {
+      for (let i = 0; i < list.length; i++) {
+        const raw = list[i] || {};
+        const s = rtStep(raw);
+        const type = s.type;
+        const path = pathPrefix.concat([i]);
+        if (++ctx.stepsExecuted > maxSteps) {
+          throw new ReplayFailure("超过最大执行步数上限 " + maxSteps + "（可能有失控循环）", path, raw);
+        }
+
+        let res = { ok: true };
+        try {
+          if (type === "loop" || type === "forEach") {
+            let items = s.items;
+            if (!Array.isArray(items)) {
+              const count = Math.max(0, Math.min(Number(s.count || 0), 1000));
+              items = Array.from({ length: count }, (_, k) => k);
+            }
+            const cap = Math.max(1, Math.min(Number(s.maxIterations || 200), 1000));
+            const seq = items.slice(0, cap);
+            const varName = String(s.var || "item");
+            const idxName = String(s.indexVar || "index");
+            const hadVar = Object.prototype.hasOwnProperty.call(ctx.vars, varName);
+            const hadIdx = Object.prototype.hasOwnProperty.call(ctx.vars, idxName);
+            const oldVar = ctx.vars[varName];
+            const oldIdx = ctx.vars[idxName];
+            for (let k = 0; k < seq.length; k++) {
+              ctx.vars[varName] = seq[k];
+              ctx.vars[idxName] = k;
+              ctx.iterations++;
+              try {
+                await runSteps(childSteps(raw.steps), path.concat(["loop", k]));
+              } catch (e) {
+                if (!s.continueOnError) throw e;
+                record(path, type, false, { iteration: k, error: (e && e.message) || String(e) });
+              }
+              if (Number(s.delayMs) > 0 && k < seq.length - 1) await sleep(Number(s.delayMs));
+            }
+            if (hadVar) ctx.vars[varName] = oldVar; else delete ctx.vars[varName];
+            if (hadIdx) ctx.vars[idxName] = oldIdx; else delete ctx.vars[idxName];
+            res = { ok: true, iterations: seq.length };
+          } else if (type === "if") {
+            let cond = false;
+            if (s.expression) {
+              cond = !!(await evalExpr(s.expression));
+            } else if (s.selector) {
+              cond = !!(await evalExpr("(() => !!document.querySelector(" + JSON.stringify(s.selector) + "))()"));
+            } else if (s.var != null) {
+              const left = ctx.vars[s.var];
+              const right = s.value;
+              switch (s.op || "truthy") {
+                case "equals": cond = String(left) === String(right); break;
+                case "notEquals": cond = String(left) !== String(right); break;
+                case "gt": cond = Number(left) > Number(right); break;
+                case "lt": cond = Number(left) < Number(right); break;
+                case "contains": cond = String(left).includes(String(right)); break;
+                default: cond = !!left;
+              }
+            }
+            await runSteps(childSteps(cond ? raw.then : raw.else), path.concat([cond ? "then" : "else"]));
+            res = { ok: true, condition: cond };
+          } else if (type === "evaluate") {
+            const value = await evalExpr(s.expression);
+            if (s.saveAs) ctx.vars[s.saveAs] = value;
+            res = { ok: true, value, saveAs: s.saveAs || undefined };
+          } else if (type === "assert" || type === "verify") {
+            let passed = false;
+            let detail;
+            if (s.expression) {
+              detail = await evalExpr(s.expression);
+              passed = s.expected === undefined ? !!detail : String(detail) === String(s.expected);
+            } else if (s.selector) {
+              detail = await evalExpr("(() => !!document.querySelector(" + JSON.stringify(s.selector) + "))()");
+              passed = !!detail;
+            } else if (s.text) {
+              detail = await evalExpr("(() => document.body.innerText.includes(" + JSON.stringify(s.text) + "))()");
+              passed = !!detail;
+            } else if (s.var != null) {
+              detail = ctx.vars[s.var];
+              passed = s.expected === undefined ? !!detail : String(detail) === String(s.expected);
+            }
+            const check = {
+              name: s.name || s.field || ("assert@" + path.join(".")),
+              ok: !!passed, soft: !!s.soft, value: detail, expected: s.expected,
+            };
+            ctx.checks.push(check);
+            if (!passed && !s.soft) {
+              throw new Error("断言失败：" + check.name + "（实际 " + JSON.stringify(detail) + "，期望 " + JSON.stringify(s.expected) + "）");
+            }
+            res = { ok: true, check };
+          } else if (type === "throttle") {
+            const ms = Math.max(0, Number(s.ms || 1000));
+            const wait = ms - (Date.now() - ctx.lastActionAt);
+            if (wait > 0) await sleep(wait);
+            ctx.lastActionAt = Date.now();
+            res = { ok: true, waitedMs: Math.max(0, wait) };
+          } else if (type === "retry") {
+            const times = Math.max(1, Math.min(Number(s.times || 3), 10));
+            let lastErr = null;
+            let attempts = 0;
+            for (let a = 0; a < times; a++) {
+              attempts++;
+              const traceStart = ctx.trace.length;
+              const completedStart = ctx.completedCount;
+              const checksStart = ctx.checks.length;
+              const iterationsStart = ctx.iterations;
+              try {
+                await runSteps(childSteps(raw.steps), path.concat(["retry", a]));
+                lastErr = null;
+                break;
+              } catch (e) {
+                lastErr = e;
+                // 失败的一次尝试整体回滚，不能把中间失败的断言/轨迹算进最终结果。
+                ctx.trace.length = traceStart;
+                ctx.completedCount = completedStart;
+                ctx.checks.length = checksStart;
+                ctx.iterations = iterationsStart;
+                if (a < times - 1) await sleep(Math.max(0, Number(s.delayMs || 500)));
+              }
+            }
+            if (lastErr) throw lastErr;
+            res = { ok: true, attempts };
+          } else if (type === "setVar") {
+            const v = s.expression ? await evalExpr(s.expression) : s.value;
+            ctx.vars[s.name] = v;
+            res = { ok: true, name: s.name, value: v };
+          } else if (type === "newTab") {
+            const t = await createLeaseTab(s.url || "about:blank");
+            ctx.tab = t;
+            await setControlTab(t.id);
+            if (s.url) await waitComplete(t.id, 8000);
+            res = { ok: true, tabId: t.id, url: t.url };
+          } else if (type === "selectTab") {
+            const tabs = await chrome.tabs.query({});
+            let t = null;
+            if (s.tabId != null) t = tabs.find((x) => x.id === Number(s.tabId));
+            else if (s.index != null) t = tabs.filter((x) => x.windowId === ctx.tab.windowId)[Number(s.index)];
+            else if (s.url) t = tabs.find((x) => String(x.url || "").includes(s.url));
+            if (!t) throw new Error("selectTab 找不到目标标签");
+            ctx.tab = t;
+            await setControlTab(t.id);
+            res = { ok: true, tabId: t.id, url: t.url };
+          } else if (type === "navigate") {
+            if (s.url) {
+              res = await HANDLERS.browser_open({ url: s.url, tabId: ctx.tab.id });
+              if (res && res.tabId) ctx.tab = await getTab({ tabId: res.tabId });
+            }
+          } else if (type === "click") {
+            const t = buildTarget(s.locator, s);
+            res = await HANDLERS.browser_click(Object.assign({ tabId: ctx.tab.id }, t));
+            await waitComplete(ctx.tab.id, 5000);
+          } else if (type === "type") {
+            if (s.sensitive === "password" || s.value === "[REDACTED_PASSWORD]") {
+              res = { ok: true, skipped: "password-redacted", note: "密码框步骤已跳过写入，复用浏览器已有登录态" };
+            } else {
+              const t = buildTarget(s.locator, s);
+              res = await HANDLERS.browser_type({
+                tabId: ctx.tab.id,
+                selector: t.selector,
+                fallbacks: t.fallbacks,
+                text: String(s.value == null ? "" : s.value),
+                clear: s.clear !== false,
+                submit: !!s.submit,
+              });
+              if (s.submit) await waitComplete(ctx.tab.id, 6000);
+            }
+          } else if (type === "select") {
+            const t = buildTarget(s.locator, s);
+            res = await HANDLERS.browser_select_option({
+              tabId: ctx.tab.id, selector: t.selector, fallbacks: t.fallbacks,
+              value: s.value, label: s.label,
+            });
+          } else if (type === "press") {
+            const t = buildTarget(s.locator, s);
+            res = await HANDLERS.browser_press({
+              tabId: ctx.tab.id, key: s.key || "Enter", selector: t.selector,
+            });
+            if (s.key === "Enter") await waitComplete(ctx.tab.id, 5000);
+          } else if (type === "scroll") {
+            res = await HANDLERS.browser_scroll({
+              tabId: ctx.tab.id, deltaY: s.deltaY,
+              direction: s.direction || "down", amount: s.amount || 600,
+            });
+          } else if (type === "extract") {
+            const t = buildTarget(s.locator, s);
+            res = await pa(ctx.tab.id, "extractData", {
+              listSelector: s.listSelector, selector: t.selector, fallbacks: t.fallbacks,
+              text: t.text, maxItems: s.maxItems || 30,
+            });
+            if (res && res.ok) {
+              const key = s.field || ("extract_step_" + (s.index || (i + 1)));
+              const value = res.mode === "list" ? res.items : res.text;
+              ctx.extractedData[key] = value;
+              if (s.saveAs) ctx.vars[s.saveAs] = value;
+            }
+          } else if (type === "wait") {
+            if (s.selector || s.text) {
+              res = await HANDLERS.browser_wait_for({
+                tabId: ctx.tab.id, selector: s.selector, text: s.text,
+                timeoutMs: s.timeoutMs || 10000,
+              });
+            } else {
+              await sleep(Number(s.ms || 1000));
+              res = { ok: true, waitedMs: Number(s.ms || 1000) };
+            }
+          } else if (type === "note") {
+            res = { ok: true, userNote: s.note };
+          } else {
+            throw new Error("未知步骤类型：" + type);
+          }
+        } catch (e) {
+          if (e instanceof ReplayFailure) throw e;
+          res = { ok: false, error: (e && e.message) || String(e) };
+        }
+
+        const stepOk = !!(res && res.ok !== false);
+        record(path, type, stepOk, {
+          userNote: s.userNote || s.note || undefined,
+          error: stepOk ? undefined : (res && res.error) || "步骤执行未成功",
+          detail: stepOk && (type === "loop" || type === "if" || type === "evaluate" || type === "assert" || type === "retry")
+            ? { iterations: res.iterations, condition: res.condition, value: res.value, attempts: res.attempts }
+            : undefined,
+        });
+        if (stepOk) ctx.completedCount++;
+        ctx.lastActionAt = Date.now();
+
+        if (!stepOk) {
+          const tolerate = s.continueOnError === true || stopOnError === false;
+          if (!tolerate) {
+            throw new ReplayFailure((res && res.error) || ("第 " + (i + 1) + " 步 (" + type + ") 回放未命中目标元素"), path, raw);
+          }
+        }
+        if (i < list.length - 1 && pathPrefix.length === 0) await sleep(stepDelayMs);
+      }
+    }
+
+    try {
+      await runSteps(steps, []);
+    } catch (e) {
+      const path = (e && e.path) || [];
+      let curTab = ctx.tab;
+      try { curTab = await chrome.tabs.get(ctx.tab.id); } catch (err) { /* ignore */ }
+      return {
+        ok: false,
+        validated: false,
+        tabId: ctx.tab.id,
+        currentUrl: curTab && curTab.url,
+        currentTitle: curTab && curTab.title,
+        completedCount: ctx.completedCount,
+        totalSteps: steps.length,
+        iterations: ctx.iterations,
+        failedStepIndex: path.length ? path[0] : 0,
+        failedPath: path,
+        failedStep: (e && e.step) || null,
+        error: (e && e.message) || String(e),
+        extractedData: ctx.extractedData,
+        vars: ctx.vars,
+        checks: ctx.checks,
+        trace: ctx.trace,
+        selfHealHint: "确定性 RPA 回放中断。请调用 browser_snapshot 获取当前页面的最新 ref 结构，按照业务意图手动完成该步及后续步骤。",
+      };
+    }
+
+    let finalTab = ctx.tab;
+    try { finalTab = await chrome.tabs.get(ctx.tab.id); } catch (e) { /* ignore */ }
+    const validated = ctx.trace.every((t) => t.ok !== false) && ctx.checks.every((c) => c.ok || c.soft);
     return {
       ok: true,
-      tabId: tab.id,
+      validated,
+      tabId: ctx.tab.id,
       finalUrl: finalTab && finalTab.url,
       finalTitle: finalTab && finalTab.title,
-      completedCount,
+      completedCount: ctx.completedCount,
       totalSteps: steps.length,
-      extractedData,
-      trace,
+      iterations: ctx.iterations,
+      extractedData: ctx.extractedData,
+      vars: ctx.vars,
+      checks: ctx.checks,
+      trace: ctx.trace,
     };
   },
 };
@@ -1407,6 +1723,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         respond({
           ok: true, wsState, settings, browser: detectBrowser(),
           tabs, activeTab: active, leaseTabId, cdpTabId: ids.length ? ids[0] : null, lastError,
+          extensionId: chrome.runtime.id, recordingSupported: true,
           recording: recordingSession && recordingSession.active ? {
             active: true,
             paused: !!recordingSession.paused,

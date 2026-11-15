@@ -26,16 +26,24 @@ function restoreDefault() {
     res.on('data', chunk => data += chunk);
     res.on('end', () => {
       let targets = JSON.parse(data);
-      const pages = targets.filter(x => x.type === 'page');
+      const isMainIdePage = (x) => x && x.type === 'page' && /^https:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(String(x.url || '')) && !/sidecar|devtools|chrome-extension:|plugin:/i.test(String(x.url || ''));
+      const pages = (Array.isArray(targets) ? targets : []).filter(isMainIdePage);
       pages.forEach((page) => {
         const ws = new WebSocket(page.webSocketDebuggerUrl);
         ws.onopen = () => {
           const code = `
             (() => {
+              try { window.__agStarlightBus?.dispose?.(); } catch (error) {}
+              try { window.__agCursorParticlesDestroy?.(); } catch (error) {}
+              try { window.__agI18n?.stop?.(); } catch (error) {}
               try { window.__agUiDispose?.(); } catch (error) {}
               try { window.__agMemoryDispose?.(); } catch (error) {}
               try { window.__agTelemetryDispose?.(); } catch (error) {}
               try { window.__agResourceActionsDispose?.(); } catch (error) {}
+              try { window.__agRunningRadarDispose?.(); } catch (error) {}
+              try { window.__agQuickCopyDispose?.(); } catch (error) {}
+              try { window.__agStarlightDispose?.(); } catch (error) {}
+              try { window.__agMediaPreviewDispose?.(); } catch (error) {}
               const ids = [
                 'antigravity-custom-bg-layer',
                 'antigravity-custom-bg-style',
@@ -67,7 +75,7 @@ function restoreDefault() {
               document.querySelectorAll('.ag-skill-card, .ag-skill-grid').forEach((node) => {
                 node.classList.remove('ag-skill-card', 'ag-skill-grid');
               });
-              document.documentElement.classList.remove('ag-immersive', 'ag-immersive-awake', 'ag-customizations-page', 'ag-attachment-reordering', 'ag-prompt-sticky', 'ag-stars-off', 'ag-memory-open', 'ag-project-animating');
+              document.documentElement.classList.remove('ag-immersive', 'ag-immersive-awake', 'ag-customizations-page', 'ag-attachment-reordering', 'ag-prompt-sticky', 'ag-stars-off', 'ag-memory-open', 'ag-project-animating', 'ag-right-reading', 'ag-video-preview-disabled');
               document.querySelectorAll('.ag-project-row-enter, .ag-project-row-exit').forEach((node) => {
                 node.classList.remove('ag-project-row-enter', 'ag-project-row-exit');
               });
@@ -75,6 +83,12 @@ function restoreDefault() {
               document.querySelectorAll('.ag-prompt-stuck').forEach((node) => {
                 node.classList.remove('ag-prompt-stuck');
                 node.removeAttribute('data-ag-prompt-preview');
+              });
+              const docStyle = document.documentElement.style;
+              ['--ag-wp-opacity','--ag-wp-tint','--ag-glass-blur','--ag-focus-x','--ag-focus-y','--ag-accent-cool','--ag-accent-alt','--ag-accent-tertiary','--ag-palette-dark','--ag-font-scale','--ag-right-reading-rgb','--ag-right-reading-alpha','--ag-right-code-size'].forEach((prop) => docStyle.removeProperty(prop));
+              delete document.documentElement.dataset.agFont;
+              document.querySelectorAll('[data-ag-orig-title],[data-ag-orig-placeholder],[data-ag-orig-alt],[data-ag-orig-value]').forEach((node) => {
+                ['data-ag-orig-title','data-ag-orig-placeholder','data-ag-orig-alt','data-ag-orig-value'].forEach((a) => node.removeAttribute(a));
               });
               return 'Restored default';
             })()

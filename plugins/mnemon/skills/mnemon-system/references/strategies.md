@@ -22,7 +22,7 @@ One main strategy runs at a time. Switching never moves data.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `residentBudgetChars` | 6000 | characters of runtime memory injected per turn |
-| `searchBudget` | 8 | memories injected per turn by the PreInvocation hook |
+| `searchBudget` | 8 | memories included by recall queries and `SessionStart` / context views |
 | `documentBudget` | 3 | document hits injected per turn |
 | `keepRevisions` | 20 | revisions kept per runtime file and per document |
 | `staleAfterDays` | 180 | age after which a never-recalled memory is reported as stale |

@@ -13,14 +13,17 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|heic)$/i;
 const MAX_MEDIA_BYTES = 100 * 1024 * 1024;
 
 export class WeixinBot {
-  constructor({ bot, secrets, hub, logger = console }) {
+  constructor({ bot, secrets, hub, logger = console, fetchImpl = fetch, onCursor = null, seenIds = [], onSeen = null }) {
     this.bot = bot;
-    this.secrets = secrets;
+    this.secrets = secrets || {};
     this.hub = hub;
     this.logger = logger;
+    this.fetchImpl = fetchImpl;
+    this.onCursor = typeof onCursor === 'function' ? onCursor : null;
     this.client = null;
     this.running = false;
-    this.dedupe = new Dedupe();
+    this._abortController = null;
+    this.dedupe = new Dedupe({ limit: 200, initial: seenIds, onChange: onSeen });
     this.typingTickets = new Map();
     this.status = 'offline';
     this.lastError = '';
@@ -33,12 +36,15 @@ export class WeixinBot {
       this.status = 'need-scan';
       return;
     }
-    this.client = new IlinkClient({ baseUrl: this.secrets.baseUrl || undefined, token });
+    this.client = new IlinkClient({ baseUrl: this.secrets.baseUrl || undefined, token, fetchImpl: this.fetchImpl });
     this.running = true;
+    this._abortController = new AbortController();
     try {
       await this.client.notifyStart();
+      if (!this.running) return;
       this.status = 'online';
     } catch (error) {
+      if (!this.running) return;
       if (error?.code === 'session-expired') {
         this.status = 'need-scan';
         this.lastError = 'errcode -14：微信会话过期，请在面板重新扫码';
@@ -48,29 +54,45 @@ export class WeixinBot {
       this.status = 'reconnecting';
       this.lastError = error?.message || String(error);
     }
-    this._loop();
+    if (this.running) this._loop();
   }
 
   stop() {
     this.running = false;
     this.status = 'offline';
+    try {
+      this._abortController?.abort();
+    } catch {
+      /* ignore */
+    }
+    this._abortController = null;
   }
 
   async _loop() {
     let cursor = this.secrets?.getUpdatesBuf || '';
+    const signal = this._abortController?.signal;
     while (this.running) {
       try {
-        const { messages, cursor: next } = await this.client.getUpdates({ cursor, timeoutMs: 35000 });
+        const { messages, cursor: next } = await this.client.getUpdates({ cursor, timeoutMs: 35000, signal });
+        if (!this.running) break;
         if (next && next !== cursor) {
           cursor = next;
           this.secrets.getUpdatesBuf = next;
+          try {
+            await this.onCursor?.(next);
+          } catch (error) {
+            this.logger.warn?.(`[weixin] 游标落盘失败：${error?.message || error}`);
+          }
         }
         for (const message of messages) {
+          if (!this.running) break;
           await this._handle(message);
         }
+        if (!this.running) break;
         this.status = 'online';
         this.lastError = '';
       } catch (error) {
+        if (!this.running) break;
         if (error?.code === 'session-expired') {
           this.status = 'need-scan';
           this.lastError = 'errcode -14：微信会话过期，请在面板重新扫码';
@@ -80,7 +102,17 @@ export class WeixinBot {
         }
         this.status = 'reconnecting';
         this.lastError = error?.message || String(error);
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, 3000);
+          signal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
       }
     }
   }
@@ -89,7 +121,11 @@ export class WeixinBot {
     const inbound = parseInbound(message);
     const hasMedia = inbound.images.length || inbound.files.length || inbound.stickers.length;
     if (!inbound.text && !hasMedia) return;
-    if (!this.dedupe.check(inbound.messageId)) return;
+    const rawTs = message?.create_time_ms ?? message?.create_time ?? message?.timestamp ?? '';
+    const dedupeKey =
+      inbound.messageId ||
+      (rawTs !== '' ? `ts:${inbound.fromUserId}:${rawTs}:${inbound.text.slice(0, 80)}:${hasMedia ? 1 : 0}` : '');
+    if (!this.dedupe.check(dedupeKey)) return;
     if (this.bot.ownerUserId && inbound.fromUserId && this.bot.ownerUserId !== inbound.fromUserId) {
       this.logger.info?.(`[weixin] 忽略非主人消息：${inbound.fromUserId}`);
       return;

@@ -41,9 +41,10 @@
   }
 
   async function buildPath(payload) {
+    const token = window.__AG_STARLIGHT_TOKEN__;
     const response = await fetch(SIDECAR() + "/api/open-resource", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: Object.assign({ "Content-Type": "application/json" }, token ? { "X-Starlight-Token": token } : {}),
       body: JSON.stringify(payload || {}),
     });
     const data = await response.json().catch(() => ({}));
@@ -205,8 +206,13 @@
     });
   }
 
-  const observer = new MutationObserver(schedule);
-  observer.observe(document.body, { childList: true, subtree: true });
+  const bus = window.__agStarlightBus;
+  const observer = bus ? null : new MutationObserver(schedule);
+  if (bus) {
+    bus.onMutation("resource-actions", schedule);
+  } else {
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 
   document.addEventListener("click", (event) => {
     const target = event.target;
@@ -216,14 +222,20 @@
     }
   }, true);
 
-  const timer = setInterval(() => {
-    scanMenus();
-    decorateSettingsSkills();
-  }, 1500);
+  const timer = bus
+    ? bus.onTick("resource-actions", 1500, () => {
+        scanMenus();
+        decorateSettingsSkills();
+      })
+    : setInterval(() => {
+        scanMenus();
+        decorateSettingsSkills();
+      }, 1500);
 
   function dispose() {
-    observer.disconnect();
-    clearInterval(timer);
+    if (observer) observer.disconnect();
+    if (bus && typeof timer === "function") timer();
+    else clearInterval(timer);
     document.querySelectorAll("[data-ag-open-resource]").forEach((node) => node.remove());
     document.querySelectorAll(".ag-skill-grid").forEach((node) => node.classList.remove("ag-skill-grid"));
     document.querySelectorAll(".ag-skill-card").forEach((node) => node.classList.remove("ag-skill-card"));

@@ -50,6 +50,10 @@ antigravity-browser-bridge/
 │   ├── dom-test.py             # 真实 Chromium 里验证页面动作层
 │   ├── banner-test.py          # 真实 Chromium 里验证提示条渲染、自动隐藏与多标签
 │   ├── banner-e2e.py           # 临时扩展 + 隔离端口验证分组标签页/常驻鼠标/CDP 生命周期（不碰 8767）
+│   ├── bg-window-e2e.py        # 临时扩展 + 隔离端口验证专属后台窗口不抢焦点（含 FOCUSLOG 逐步证据）
+│   ├── validate-compiled-skill.js  # 校验录制编译产物与轨迹一致性，拦截「文档幻觉」SOP
+│   ├── replay-engine-unit.cjs  # 回放插值/过滤器/数组保留纯逻辑单测
+│   ├── replay-engine-e2e.py    # 真实扩展验证 loop/if/assert/retry/evaluate/多标签
 │   ├── e2e-test.py             # 真装扩展 + 真 MCP 服务的端到端验收
 │   └── fixture.html            # 测试页
 └── package.json
@@ -197,11 +201,11 @@ Antigravity ──MCP(stdio JSON-RPC)──▶ mcp-server/server.js
 
 ### 专属分组标签页与常驻鼠标
 
-控制类工具默认在**当前窗口内的代理专属标签页**（`leaseTab`）里工作。该标签页会自动加入名为 **「谷谷嘎嘎控制中」** 的紫色标签组，并置为 active，让用户能直接看到控制鼠标、action 标签与浏览器原生调试提示条；用户原来的标签页仍保持打开、内容不被改写，随时可以切回。
+控制类工具默认在**代理专属后台窗口内的标签页**（`leaseTab`）里工作。该窗口创建时不抢焦点（`focused:false`），leaseTab 在其窗口内为 active 以保证截图 surface；标签页自动加入名为 **「谷谷嘎嘎控制中」** 的紫色标签组。用户当前窗口与标签完全不变、不被打扰；想看控制过程时打开该后台窗口，即可看到常驻鼠标、action 标签与浏览器原生调试提示条。
 
 首次控制动作后，页面内显示**常驻鼠标**：打开/读取/等待显示在视口中央，点击/输入/滚动移动到目标元素或动作点，带青色光晕、圆环和“正在控制”标签；鼠标 `pointer-events:none`，不挡页面点击，空闲也不会消失，直到控制会话结束才清理。
 
-`browser_tabs new` / `browser_open newTab=true` 会在同一窗口再创建一个分组专属标签页并成为 leaseTab；`browser_tabs list` 会返回 `groupId` 与 `leased` 标记。需要控制用户指定的标签时显式传 `tabId`。受保护页面（`edge://`、`chrome://`、扩展商店、PDF 阅读器）无法注入或截图，扩展会静默跳过或返回明确错误，工具调用本身不受影响。
+`browser_tabs new` / `browser_open newTab=true` 会在该后台窗口再创建一个分组专属标签页并成为 leaseTab；`browser_tabs list` 会返回 `groupId` 与 `leased` 标记。需要控制用户指定的标签时显式传 `tabId`；需要把代理页切到前台时显式 `browser_tabs activate`。受保护页面（`edge://`、`chrome://`、扩展商店、PDF 阅读器）无法注入或截图，扩展会静默跳过或返回明确错误，工具调用本身不受影响。
 
 ## 权限与安全
 
@@ -264,8 +268,12 @@ npm run test:bridge       # 桥接层：模拟扩展 + 真实 MCP 服务，52 �
 npm run test:relay        # Leader/Follower 双进程 + Leader 退出接管，22 项
 npm run test:dom          # 真实 Chromium 里跑页面动作层，39 项
 npm run test:banner       # 真实 Chromium 里跑控制提示条，36 项
-npm run test:banner:e2e   # 临时扩展 + 隔离随机端口跑提示条完整链路，29 项
-npm run test:e2e          # 真装扩展 + 真 MCP 服务跑完整链路，29 项
+npm run test:banner:e2e   # 临时扩展 + 隔离随机端口跑提示条完整链路
+npm run test:bg:window    # 专属后台窗口专项：headed Chromium 验证不抢焦点（32 项）
+npm run test:replay:unit  # 回放插值/过滤器/数组保留单测（9 项）
+npm run test:replay:e2e   # 真实扩展验证 loop/if/assert/retry/多标签（18 项）
+npm run validate:skill    # 校验录制编译产物与轨迹一致性
+npm run test:e2e          # 真装扩展 + 真 MCP 服务跑完整链路
 ```
 
 `test:relay` 默认用正式端口 `8767`；若该端口被其他程序占用，用 `AG_RELAY_TEST_PORT` 指定测试端口（例如 `set AG_RELAY_TEST_PORT=8773 && npm run test:relay`），默认配置仍由 `node mcp-server/server.js --print-config` 校验。
@@ -274,16 +282,21 @@ npm run test:e2e          # 真装扩展 + 真 MCP 服务跑完整链路，29 �
 
 `test:dom`、`test:banner` 与 `test:e2e` 需要 `python3` 和 Playwright（`pip install playwright && playwright install chromium`）。
 
-本次交付前的实测结果：
+本次交付前的实测结果（2026-11-10 本轮重跑：`self-test.cjs` 58/0、`banner-e2e.py` 51/0、`bg-window-e2e.py` 32/0、`replay-engine-unit.cjs` 9/0、`replay-engine-e2e.py` 18/0；其余为历史实测）：
 
 | 测试 | 环境 | 结果 |
 | --- | --- | --- |
-| `self-test.cjs` | Node 25.2.0 (win32 x64) | 52 通过 / 0 失败 |
+| `self-test.cjs` | Node 25.2.0 (win32 x64) | 58 通过 / 0 失败 |
 | `relay-test.cjs` | Node 25.2.0，端口 8773（8767 被其他程序占用） | 22 通过 / 0 失败 |
 | `dom-test.py` | Playwright Chromium（headless，UTF-8 I/O） | 49 通过 / 0 失败 |
 | `cursor-test.py` | Playwright Chromium（headless，常驻鼠标） | 17 通过 / 0 失败 |
 | `banner-test.py` | Playwright Chromium（headless，含严格 CSP 页面） | 37 通过 / 0 失败 |
 | `banner-e2e.py` | 临时扩展 + 随机端口 + 独立浏览器配置 | 51 通过 / 0 失败 |
+| `bg-window-e2e.py` | headed Chromium + 随机端口 + 独立浏览器配置 | 32 通过 / 0 失败 |
+| `replay-engine-unit.cjs` | Node 25.2.0（纯逻辑，不开浏览器） | 9 通过 / 0 失败 |
+| `replay-engine-e2e.py` | 临时扩展 + 随机端口 + headed Chromium | 18 通过 / 0 失败 |
 | `e2e-test.py` | Playwright Chromium 加载真实扩展 | 未在本轮运行（8767 被其他程序占用；不向用户浏览器安装扩展） |
 
-端到端覆盖了：扩展自动连接 → 导航 → 快照取 ref → CDP 真实点击与输入（含受控输入兼容）→ 表单真的被提交 → 页面求值 → 下拉选择 → 取文本 → 截图（校验为合法 PNG）→ 控制台日志采集 → 滚动 → 等待元素 → 标签页新建/列出/关闭 → 无效 ref、未支持协议、受保护页面三类错误路径；专属窗口专项覆盖了用户当前页不变、窗口不抢焦点、常驻鼠标、后台窗口截图、lease 创建/切换/关闭与断开清理。
+端到端覆盖了：扩展自动连接 → 导航 → 快照取 ref → CDP 真实点击与输入（含受控输入兼容）→ 表单真的被提交 → 页面求值 → 下拉选择 → 取文本 → 截图（校验为合法 PNG）→ 控制台日志采集 → 滚动 → 等待元素 → 标签页新建/列出/关闭 → 无效 ref、未支持协议、受保护页面三类错误路径；`bg-window-e2e.py` 专属窗口专项覆盖了用户当前页不变、窗口不抢焦点、常驻鼠标、后台窗口截图、lease 创建/切换/关闭与断开清理；它在 service worker 里逐步记录 chrome API 调用前后的窗口 focused 状态（FOCUSLOG），可直接定位任何抢焦点回归。
+
+`replay-engine-e2e.py` 覆盖录制回放引擎的结构化能力：`loop` 数组迭代、`evaluate` + `saveAs`、`assert`（含 soft）、`if` 分支、`retry` 失败回滚、`throttle`、`newTab`/`selectTab` 多标签、嵌套 `trace` 与 `failedPath` 断点回报。编译产物可用 `npm run validate:skill -- <skill目录>` 体检文档与轨迹是否一致。

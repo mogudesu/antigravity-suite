@@ -45,7 +45,7 @@ function fetchTargets(port) {
       });
     });
     request.on('error', () => resolve([]));
-    request.setTimeout(2500, () => {
+    request.setTimeout(350, () => {
       request.destroy();
       resolve([]);
     });
@@ -114,23 +114,54 @@ async function inspectPage() {
 }
 
 async function main() {
-  if (!isEnabled()) process.exit(0);
-  for (let attempt = 0; attempt < 18; attempt += 1) {
+  if (!isEnabled()) {
+    process.stdout.write('{}\n');
+    process.exit(0);
+  }
+  const port = readPort();
+  if (!port) {
+    process.stdout.write('{}\n');
+    process.exit(0);
+  }
+  const initialTargets = await fetchTargets(port);
+  const hasIdeTarget = Array.isArray(initialTargets) && initialTargets.some((target) =>
+    target.type === 'page' && /^https:\/\/127\.0\.0\.1:\d+\//.test(target.url || '')
+  );
+  if (!hasIdeTarget) {
+    process.stdout.write('{}\n');
+    process.exit(0);
+  }
+  let appliedOnce = false;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const state = await inspectPage();
     if (state && state.ready) {
-      if (state.ui && state.style) process.exit(0);
-      spawnSync(process.execPath, [APPLY_JS], {
-        cwd: PLUGIN_ROOT,
-        stdio: 'ignore',
-        timeout: 20000
-      });
-      await sleep(1200);
-      const after = await inspectPage();
-      if (after && after.ui && after.style) process.exit(0);
+      if (state.ui && state.style) {
+        process.stdout.write('{}\n');
+        process.exit(0);
+      }
+      if (!appliedOnce) {
+        appliedOnce = true;
+        spawnSync(process.execPath, [APPLY_JS], {
+          cwd: PLUGIN_ROOT,
+          stdio: 'ignore',
+          timeout: 15000
+        });
+        await sleep(600);
+        const after = await inspectPage();
+        if (after && after.ui && after.style) {
+          process.stdout.write('{}\n');
+          process.exit(0);
+        }
+      }
+      break;
     }
-    await sleep(2000);
+    await sleep(500);
   }
+  process.stdout.write('{}\n');
   process.exit(0);
 }
 
-main().catch(() => process.exit(0));
+main().catch(() => {
+  try { process.stdout.write('{}\n'); } catch {}
+  process.exit(0);
+});

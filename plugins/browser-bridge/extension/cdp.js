@@ -103,42 +103,126 @@ const KEY_TABLE = {
   PageUp: { key: "PageUp", code: "PageUp", keyCode: 33 },
   PageDown: { key: "PageDown", code: "PageDown", keyCode: 34 },
   Space: { key: " ", code: "Space", keyCode: 32, text: " " },
+  " ": { key: " ", code: "Space", keyCode: 32, text: " " },
+  Shift: { key: "Shift", code: "ShiftLeft", keyCode: 16 },
+  Control: { key: "Control", code: "ControlLeft", keyCode: 17 },
+  Alt: { key: "Alt", code: "AltLeft", keyCode: 18 },
+  Meta: { key: "Meta", code: "MetaLeft", keyCode: 91 },
 };
+for (let i = 1; i <= 12; i++) {
+  KEY_TABLE["F" + i] = { key: "F" + i, code: "F" + i, keyCode: 111 + i };
+}
+
+const OEM_CHARS = {
+  "-": { code: "Minus", keyCode: 189, shift: false },
+  "_": { code: "Minus", keyCode: 189, shift: true },
+  "=": { code: "Equal", keyCode: 187, shift: false },
+  "+": { code: "Equal", keyCode: 187, shift: true },
+  "[": { code: "BracketLeft", keyCode: 219, shift: false },
+  "{": { code: "BracketLeft", keyCode: 219, shift: true },
+  "]": { code: "BracketRight", keyCode: 221, shift: false },
+  "}": { code: "BracketRight", keyCode: 221, shift: true },
+  "\\": { code: "Backslash", keyCode: 220, shift: false },
+  "|": { code: "Backslash", keyCode: 220, shift: true },
+  ";": { code: "Semicolon", keyCode: 186, shift: false },
+  ":": { code: "Semicolon", keyCode: 186, shift: true },
+  "'": { code: "Quote", keyCode: 222, shift: false },
+  "\"": { code: "Quote", keyCode: 222, shift: true },
+  ",": { code: "Comma", keyCode: 188, shift: false },
+  "<": { code: "Comma", keyCode: 188, shift: true },
+  ".": { code: "Period", keyCode: 190, shift: false },
+  ">": { code: "Period", keyCode: 190, shift: true },
+  "/": { code: "Slash", keyCode: 191, shift: false },
+  "?": { code: "Slash", keyCode: 191, shift: true },
+  "`": { code: "Backquote", keyCode: 192, shift: false },
+  "~": { code: "Backquote", keyCode: 192, shift: true },
+  "!": { code: "Digit1", keyCode: 49, shift: true },
+  "@": { code: "Digit2", keyCode: 50, shift: true },
+  "#": { code: "Digit3", keyCode: 51, shift: true },
+  "$": { code: "Digit4", keyCode: 52, shift: true },
+  "%": { code: "Digit5", keyCode: 53, shift: true },
+  "^": { code: "Digit6", keyCode: 54, shift: true },
+  "&": { code: "Digit7", keyCode: 55, shift: true },
+  "*": { code: "Digit8", keyCode: 56, shift: true },
+  "(": { code: "Digit9", keyCode: 57, shift: true },
+  ")": { code: "Digit0", keyCode: 48, shift: true },
+};
+
+function charKeySpec(ch) {
+  if (ch === " ") return KEY_TABLE.Space;
+  if (/^[a-zA-Z]$/.test(ch)) {
+    const upper = ch.toUpperCase();
+    return { key: ch, code: "Key" + upper, keyCode: upper.charCodeAt(0), shift: ch !== ch.toLowerCase(), text: ch };
+  }
+  if (/^[0-9]$/.test(ch)) {
+    return { key: ch, code: "Digit" + ch, keyCode: ch.charCodeAt(0), shift: false, text: ch };
+  }
+  if (OEM_CHARS[ch]) {
+    const o = OEM_CHARS[ch];
+    return { key: ch, code: o.code, keyCode: o.keyCode, shift: o.shift, text: ch };
+  }
+  return null;
+}
 
 function keySpec(key) {
   if (KEY_TABLE[key]) return KEY_TABLE[key];
   if (key.length === 1) {
-    const upper = key.toUpperCase();
-    return { key, code: /[a-zA-Z]/.test(key) ? "Key" + upper : "Unidentified", keyCode: upper.charCodeAt(0), text: key };
+    const c = charKeySpec(key);
+    if (c) return c;
+    return { key, code: "Unidentified", keyCode: 0, text: key };
   }
   return { key, code: key, keyCode: 0 };
 }
 
-/** 真实按键；带 text 的按键走 keyDown，其余走 rawKeyDown */
+function parseCombo(combo) {
+  const parts = String(combo || "").split("+").map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return { modifiers: 0, key: String(combo || "") };
+  if (parts.length === 1) return { modifiers: 0, key: parts[0] };
+  let modifiers = 0;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const m = parts[i].toLowerCase();
+    if (m === "alt") modifiers |= 1;
+    else if (m === "control" || m === "ctrl") modifiers |= 2;
+    else if (m === "meta" || m === "cmd" || m === "command" || m === "win") modifiers |= 4;
+    else if (m === "shift") modifiers |= 8;
+  }
+  return { modifiers, key: parts[parts.length - 1] };
+}
+
+/** 真实按键与组合键；带 text 且无控制修饰键时走 keyDown，否则走 rawKeyDown */
 export async function pressKey(tabId, key, opts = {}) {
-  const k = keySpec(key);
+  const parsed = parseCombo(key);
+  const k = keySpec(parsed.key);
+  const modifiers = Number(opts.modifiers || parsed.modifiers || 0) | (k.shift ? 8 : 0);
+  const hasCtrlOrAltOrMeta = (modifiers & (1 | 2 | 4)) !== 0;
   const base = {
     key: k.key,
     code: k.code,
     windowsVirtualKeyCode: k.keyCode,
     nativeVirtualKeyCode: k.keyCode,
-    modifiers: Number(opts.modifiers || 0),
+    modifiers,
   };
-  const downType = k.text ? "keyDown" : "rawKeyDown";
-  await send(tabId, "Input.dispatchKeyEvent", Object.assign({ type: downType }, base, k.text ? { text: k.text, unmodifiedText: k.text } : {}));
+  const sendText = k.text && !hasCtrlOrAltOrMeta;
+  const downType = sendText ? "keyDown" : "rawKeyDown";
+  await send(tabId, "Input.dispatchKeyEvent", Object.assign({ type: downType }, base, sendText ? { text: k.text, unmodifiedText: k.text } : {}));
   await send(tabId, "Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, base));
 }
 
-/** 逐字符真实按键，适合有 keydown / keypress 监听的站点 */
+/** 逐字符真实按键；非 ASCII/中文直接走 Input.insertText 避免 VK 错位 */
 export async function typeKeys(tabId, text) {
   const chars = Array.from(String(text));
   for (const ch of chars) {
-    const code = ch.codePointAt(0);
+    const spec = charKeySpec(ch);
+    if (!spec) {
+      await send(tabId, "Input.insertText", { text: ch });
+      continue;
+    }
     const base = {
-      key: ch,
-      code: /[a-zA-Z]/.test(ch) ? "Key" + ch.toUpperCase() : "Unidentified",
-      windowsVirtualKeyCode: code,
-      nativeVirtualKeyCode: code,
+      key: spec.key,
+      code: spec.code,
+      windowsVirtualKeyCode: spec.keyCode,
+      nativeVirtualKeyCode: spec.keyCode,
+      modifiers: spec.shift ? 8 : 0,
     };
     await send(tabId, "Input.dispatchKeyEvent", Object.assign({ type: "keyDown", text: ch, unmodifiedText: ch }, base));
     await send(tabId, "Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, base));

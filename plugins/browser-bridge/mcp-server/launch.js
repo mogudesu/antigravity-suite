@@ -156,7 +156,7 @@ async function runBrowserLaunch(args, deps) {
     : 8000;
   const resolved = resolveBrowser(a);
   if (resolved.error) {
-    return { ok: false, stage: "bad-arguments", code: resolved.error.code, error: resolved.error.message };
+    return { ok: false, mode: "extension", headless: false, instanceReused: false, stage: "bad-arguments", code: resolved.error.code, error: resolved.error.message };
   }
 
   const built = buildArgs(a);
@@ -167,6 +167,9 @@ async function runBrowserLaunch(args, deps) {
       ok: resolved.exists,
       dryRun: true,
       launched: false,
+      mode: "extension",
+      headless: false,
+      instanceReused: false,
       stage: "dry-run",
       browser: resolved.browser,
       executablePath: resolved.exe,
@@ -177,8 +180,8 @@ async function runBrowserLaunch(args, deps) {
       waitConnectMs,
       commandLine,
       message: resolved.exists
-        ? "dry-run：仅校验启动命令，未真正启动浏览器。"
-        : "dry-run：目标浏览器可执行文件不存在，未启动。" + " 候选路径：" + resolved.candidates.join(" | "),
+        ? "dry-run（extension 扩展模式）：仅校验启动命令，未真正启动浏览器。"
+        : "dry-run（extension 扩展模式）：目标浏览器可执行文件不存在，未启动。" + " 候选路径：" + resolved.candidates.join(" | "),
     };
   }
 
@@ -186,6 +189,9 @@ async function runBrowserLaunch(args, deps) {
     const guide = extensionGuide(rootDir, port);
     return {
       ok: false,
+      mode: "extension",
+      headless: false,
+      instanceReused: false,
       stage: "browser-not-found",
       code: "BROWSER_NOT_FOUND",
       browser: resolved.browser,
@@ -207,13 +213,16 @@ async function runBrowserLaunch(args, deps) {
     return {
       ok: true,
       launched: false,
+      mode: "extension",
+      headless: false,
+      instanceReused: true,
       stage: "already-connected",
       browser: already.browser,
       executablePath: resolved.exe,
       profileDirectory: built.profile || null,
       url: built.url,
       clients: existing,
-      message: `${already.browser} 扩展已连接，无需重复启动浏览器。`,
+      message: `${already.browser} 扩展已连接（复用可见扩展实例），无需重复启动浏览器。`,
     };
   }
 
@@ -225,6 +234,9 @@ async function runBrowserLaunch(args, deps) {
     const guide = extensionGuide(rootDir, port);
     return {
       ok: false,
+      mode: "extension",
+      headless: false,
+      instanceReused: false,
       stage: "spawn-failed",
       code: "SPAWN_FAILED",
       browser: resolved.browser,
@@ -240,6 +252,9 @@ async function runBrowserLaunch(args, deps) {
     return {
       ok: true,
       launched: true,
+      mode: "extension",
+      headless: false,
+      instanceReused: false,
       stage: "connected",
       pid,
       browser: waited.client.browser,
@@ -256,6 +271,9 @@ async function runBrowserLaunch(args, deps) {
   return {
     ok: false,
     launched: true,
+    mode: "extension",
+    headless: false,
+    instanceReused: false,
     stage: "launched-without-extension",
     pid,
     browser: resolved.browser,

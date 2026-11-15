@@ -12,6 +12,7 @@ const EMPTY = () => ({
   bots: {}, // botId -> BotConfig
   bindings: {}, // `${botId}:${chatId}` -> { conversationId, title, workspace, model, updatedAt }
   cursors: {}, // botId -> 平台游标（get_updates_buf / lastUpdateId ...）
+  seenMessages: {}, // botId -> [{ id, at }] 已处理消息去重窗口（跨重启防重放）
   deferred: [], // 超时转后台的待补发任务
   meta: { createdAt: Date.now() },
 });
@@ -28,7 +29,15 @@ export class StateStore {
   load() {
     const read = (file) => {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return { ...EMPTY(), ...parsed, bots: parsed.bots || {}, bindings: parsed.bindings || {}, cursors: parsed.cursors || {}, deferred: parsed.deferred || [] };
+      return {
+        ...EMPTY(),
+        ...parsed,
+        bots: parsed.bots || {},
+        bindings: parsed.bindings || {},
+        cursors: parsed.cursors || {},
+        seenMessages: parsed.seenMessages || {},
+        deferred: parsed.deferred || [],
+      };
     };
     try {
       this.data = read(this.file);
@@ -91,6 +100,8 @@ export class StateStore {
   removeBot(botId) {
     if (!this.data.bots[botId]) return false;
     delete this.data.bots[botId];
+    delete this.data.cursors[botId];
+    if (this.data.seenMessages) delete this.data.seenMessages[botId];
     for (const key of Object.keys(this.data.bindings)) {
       if (key.startsWith(`${botId}:`)) delete this.data.bindings[key];
     }
@@ -138,8 +149,9 @@ export class StateStore {
   }
 
   setCursor(botId, cursor) {
+    if (this.data.cursors[botId] === cursor) return;
     this.data.cursors[botId] = cursor;
-    this.save();
+    this.save({ force: true });
   }
 
   // ---------------------------------------------------------------- deferred
@@ -158,5 +170,22 @@ export class StateStore {
 
   get deferredCount() {
     return this.data.deferred.length;
+  }
+
+  // ---------------------------------------------------------------- seenMessages
+
+  getSeenMessages(botId) {
+    const list = this.data.seenMessages?.[botId];
+    return Array.isArray(list) ? list : [];
+  }
+
+  setSeenMessages(botId, entries) {
+    if (!this.data.seenMessages) this.data.seenMessages = {};
+    this.data.seenMessages[botId] = Array.isArray(entries) ? entries.slice(-200) : [];
+    this.save({ force: true });
+  }
+
+  flushDirty() {
+    if (this._dirty) this.save({ force: true });
   }
 }

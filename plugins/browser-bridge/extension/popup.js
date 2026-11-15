@@ -4,6 +4,27 @@ function send(msg) {
   return new Promise((resolve) => chrome.runtime.sendMessage(msg, (r) => resolve(r || {})));
 }
 
+function showRecError(message) {
+  const box = $("rec-error");
+  if (!message) {
+    box.textContent = "";
+    box.classList.add("hidden");
+    return;
+  }
+  box.textContent = message;
+  box.classList.remove("hidden");
+}
+
+function setRecBusy(busy, label) {
+  $("rec-start").disabled = busy;
+  $("rec-stop").disabled = busy;
+  if (busy) {
+    const badge = $("rec-state");
+    badge.textContent = label || "处理中…";
+    badge.className = "rec-badge live";
+  }
+}
+
 async function render() {
   const st = await send({ type: "ag:status" });
   const s = st.settings || {};
@@ -20,11 +41,11 @@ async function render() {
     : st.wsState === "connecting" ? "正在连接…"
     : "未连接（等待 MCP 服务启动）";
   const lines = [];
-  if (st.tabs != null) lines.push("标签页 " + st.tabs + " 个");
-  if (st.activeTab) lines.push("当前：" + st.activeTab.title);
-  if (st.cdpTabId) lines.push("CDP 已附加 tab " + st.cdpTabId);
-  if (st.lastError) lines.push("最近错误：" + st.lastError);
-  $("detail").textContent = lines.join(" · ");
+  if (st.tabs != null) lines.push("标签 " + st.tabs);
+  if (st.activeTab) lines.push(st.activeTab.title ? "当前：" + st.activeTab.title : "");
+  if (st.cdpTabId) lines.push("CDP tab " + st.cdpTabId);
+  if (st.lastError) lines.push("错误：" + st.lastError);
+  $("detail").textContent = lines.filter(Boolean).join(" · ");
 
   const rec = st.recording;
   const lastRec = st.lastRecording;
@@ -35,30 +56,54 @@ async function render() {
   if (rec && rec.active) {
     recBadge.textContent = rec.paused ? "已暂停" : ("录制中 · " + (rec.stepCount || 0) + " 步");
     recBadge.className = "rec-badge on";
-    recDetail.textContent = "会话 " + rec.recordingId + " · 可在页面右下角胶囊添加备注或标记提取";
+    recDetail.textContent = "会话 " + rec.recordingId + " · 页面右下角胶囊可备注规则 / 标记提取 / 完成";
     btnStart.disabled = true;
     btnStop.disabled = false;
   } else {
     recBadge.textContent = "待命";
     recBadge.className = "rec-badge";
     if (lastRec) {
-      recDetail.textContent = "最近录制：" + (lastRec.title || lastRec.recordingId) + "（共 " + (lastRec.stepCount || 0) + " 步），可在 Antigravity 中生成 Skill";
+      recDetail.textContent = "最近录制：" + (lastRec.title || lastRec.recordingId) + "（" + (lastRec.stepCount || 0) + " 步），可在 Antigravity 中生成 Skill";
     } else {
       recDetail.textContent = "点击下方按钮在当前标签页开启 RPA 轨迹录制";
     }
     btnStart.disabled = false;
     btnStop.disabled = true;
   }
+
+  // 旧版 service worker 连录制消息都不认识：给出明确的重载指引，而不是静默失败
+  if (st.wsState === "connected" && st.recordingSupported === false) {
+    showRecError("当前扩展仍在运行旧代码，录制/回放不可用。请点击底部「⟳ 重载扩展」后重试。");
+  }
 }
 
 $("rec-start").onclick = async () => {
-  await send({ type: "ag:record:start", args: {} });
+  showRecError("");
+  setRecBusy(true, "正在启动…");
+  const res = await send({ type: "ag:record:start", args: {} });
+  if (!res || res.ok === false) {
+    showRecError((res && (res.error || res.hint)) || "无法开始录制：当前页面可能受保护（edge://、扩展商店等），或扩展需要重载。");
+  } else if (res.hudInjected === false) {
+    showRecError(res.hudNote || "录制已开启，但当前页面无法注入悬浮录制胶囊（受保护页面）。请打开普通网页后再录制。");
+  }
+  setRecBusy(false);
   render();
 };
 
 $("rec-stop").onclick = async () => {
-  await send({ type: "ag:record:stop", args: {} });
+  showRecError("");
+  setRecBusy(true, "正在保存…");
+  const res = await send({ type: "ag:record:stop", args: {} });
+  if (!res || res.ok === false) {
+    showRecError((res && (res.error || res.hint)) || "完成录制失败，请重试。");
+  }
+  setRecBusy(false);
   render();
+};
+
+$("reload-ext").onclick = () => {
+  showRecError("");
+  chrome.runtime.reload();
 };
 
 $("save").onclick = async () => {

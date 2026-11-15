@@ -322,7 +322,11 @@ class Policy:
             return None
         record = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
         record.update(entry)
-        path = os.path.join(self.data_dir, "audit-%s.jsonl" % datetime.date.today().isoformat())
+        env_audit = os.environ.get("CU_AUDIT_DIR", "").strip()
+        target_dir = self.data_dir
+        if env_audit and os.path.abspath(self.data_dir) == os.path.abspath(default_data_dir()):
+            target_dir = env_audit
+        path = os.path.join(target_dir, "audit-%s.jsonl" % datetime.date.today().isoformat())
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "a", encoding="utf-8") as handle:

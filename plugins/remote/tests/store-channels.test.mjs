@@ -165,3 +165,53 @@ test('state.json 损坏时从 .bak 恢复，不清零机器人', () => {
   assert.ok(recovered.getBot('bot-a'), '应该从 .bak 恢复出机器人');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('StateStore 游标、已见消息去重持久化、立即落盘与删号清理', () => {
+  const prevHome = process.env.AG_REMOTE_HOME;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agb-state-persist-'));
+  process.env.AG_REMOTE_HOME = dir;
+  try {
+    const file = path.join(dir, 'state.json');
+    const store = new StateStore(file);
+
+    // 先触发一次 force save（更新 _lastWrite），紧接着在 800ms 节流窗口内写 cursor 与 seenMessages
+    store.upsertBot({ id: 'wx-1', platform: 'weixin', alias: 'WX' });
+    store.setBinding('wx-1', 'u1', { botId: 'wx-1', chatId: 'u1', targetSession: 's1' });
+    store.setCursor('wx-1', 'cur-1');
+
+    const entries = Array.from({ length: 250 }, (_, i) => ({ id: `m-${i}`, at: 1000 + i }));
+    store.setSeenMessages('wx-1', entries);
+
+    // 未超过 800ms 重新从磁盘读取，确认没有被节流丢掉
+    const reloaded = new StateStore(file);
+    assert.equal(reloaded.getCursor('wx-1'), 'cur-1');
+    const seen = reloaded.getSeenMessages('wx-1');
+    assert.equal(seen.length, 200); // 截断到最近 200 条
+    assert.equal(seen[0].id, 'm-50');
+    assert.equal(seen[199].id, 'm-249');
+
+    // 验证普通非强制 save 被节流后可通过 flushDirty 立即落盘
+    reloaded.save({ force: true }); // 更新 reloaded._lastWrite
+    reloaded.data.cursors['wx-1'] = 'cur-dirty';
+    reloaded.save(); // 800ms 内非强制写入只标 _dirty
+    assert.equal(reloaded._dirty, true);
+    const beforeFlush = new StateStore(file);
+    assert.equal(beforeFlush.getCursor('wx-1'), 'cur-1');
+    reloaded.flushDirty();
+    assert.equal(reloaded._dirty, false);
+    const afterFlush = new StateStore(file);
+    assert.equal(afterFlush.getCursor('wx-1'), 'cur-dirty');
+
+    // removeBot 同步清理 bindings / cursors / seenMessages
+    assert.equal(afterFlush.removeBot('wx-1'), true);
+    const cleaned = new StateStore(file);
+    assert.equal(cleaned.getBot('wx-1'), null);
+    assert.equal(cleaned.getCursor('wx-1'), null);
+    assert.deepEqual(cleaned.getSeenMessages('wx-1'), []);
+    assert.equal(cleaned.data.bindings['wx-1:u1'], undefined);
+  } finally {
+    if (prevHome === undefined) delete process.env.AG_REMOTE_HOME;
+    else process.env.AG_REMOTE_HOME = prevHome;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

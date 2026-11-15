@@ -33,58 +33,75 @@ function fetchTargets(port) {
   });
 }
 
-let socket = null;
+const isMainIdePage = (target) => {
+  if (!target || target.type !== 'page') return false;
+  const u = String(target.url || '');
+  if (!/^https:\/\/(?:127\.0\.0\.1|localhost):\d+\//i.test(u)) return false;
+  if (/sidecar|devtools|chrome-extension:|plugin:/i.test(u)) return false;
+  return true;
+};
+
+const sockets = new Map();
 let connecting = null;
 let lastAttempt = 0;
 let messageId = 0;
 
-async function connect() {
-  if (socket && socket.readyState === WebSocket.OPEN) return socket;
-  if (connecting) return connecting;
+async function connectAll() {
   const now = Date.now();
-  if (now - lastAttempt < 700) return null;
+  const openList = Array.from(sockets.values()).filter((ws) => ws && ws.readyState === WebSocket.OPEN);
+  if (openList.length && now - lastAttempt < 2500) return openList;
+  if (connecting) return connecting;
+  if (now - lastAttempt < 700) return openList;
   lastAttempt = now;
 
   connecting = (async () => {
     const port = getDevToolsPort();
-    if (!port) return null;
+    if (!port) return [];
     const targets = await fetchTargets(port);
-    const page = (targets || []).find((target) =>
-      target.type === 'page' && /^https:\/\//.test(target.url || '') && !String(target.url).startsWith('plugin://')
-    );
-    if (!page) return null;
+    const pages = (Array.isArray(targets) ? targets : []).filter((t) => isMainIdePage(t) && t.webSocketDebuggerUrl);
+    const activeUrls = new Set(pages.map((p) => p.webSocketDebuggerUrl));
+    for (const [url, ws] of sockets.entries()) {
+      if (!activeUrls.has(url) || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        try { ws.close(); } catch (e) {}
+        sockets.delete(url);
+      }
+    }
+    await Promise.all(pages.map((page) => {
+      const url = page.webSocketDebuggerUrl;
+      const existing = sockets.get(url);
+      if (existing && existing.readyState === WebSocket.OPEN) return Promise.resolve();
+      return new Promise((resolve) => {
+        const ws = new WebSocket(url);
+        const timer = setTimeout(() => {
+          try { ws.close(); } catch (error) {}
+          resolve();
+        }, 2500);
+        ws.onopen = () => {
+          clearTimeout(timer);
+          sockets.set(url, ws);
+          resolve();
+        };
+        ws.onclose = () => {
+          clearTimeout(timer);
+          if (sockets.get(url) === ws) sockets.delete(url);
+          resolve();
+        };
+        ws.onerror = () => {
+          clearTimeout(timer);
+          if (sockets.get(url) === ws) sockets.delete(url);
+          resolve();
+        };
+        ws.onmessage = () => {};
+      });
+    }));
 
-    await new Promise((resolve) => {
-      const ws = new WebSocket(page.webSocketDebuggerUrl);
-      const timer = setTimeout(() => {
-        try { ws.close(); } catch (error) {}
-        resolve(null);
-      }, 2500);
-      ws.onopen = () => {
-        clearTimeout(timer);
-        socket = ws;
-        resolve(ws);
-      };
-      ws.onclose = () => {
-        clearTimeout(timer);
-        if (socket === ws) socket = null;
-        resolve(null);
-      };
-      ws.onerror = () => {
-        clearTimeout(timer);
-        if (socket === ws) socket = null;
-        resolve(null);
-      };
-      ws.onmessage = () => {};
-    });
-
-    return socket;
+    return Array.from(sockets.values()).filter((ws) => ws && ws.readyState === WebSocket.OPEN);
   })();
 
   try {
     return await connecting;
   } catch (error) {
-    return null;
+    return Array.from(sockets.values()).filter((ws) => ws && ws.readyState === WebSocket.OPEN);
   } finally {
     connecting = null;
   }
@@ -101,9 +118,34 @@ function buildExpression(payload) {
         document.documentElement.lang = p.language;
         try { window.__agI18n?.setLanguage?.(p.language); } catch (error) {}
       }
-      if (p.cursorParticles === false) {
-        const trail = document.getElementById('antigravity-cursor-particles');
-        if (trail) trail.remove();
+      if (typeof p.deepI18n === 'boolean' || typeof p.translateAlerts === 'boolean') {
+        try { window.__agI18n?.applyConfig?.(p); } catch (error) {}
+      }
+      if (typeof p.cursorParticles === 'boolean') {
+        if (typeof window.__agSyncCursorParticles === 'function') {
+          window.__agSyncCursorParticles(p.cursorParticles);
+        } else if (p.cursorParticles === false) {
+          const trail = document.getElementById('antigravity-cursor-particles');
+          if (trail) trail.remove();
+        }
+      }
+      if (typeof p.rightReadingEnabled === 'boolean') {
+        document.documentElement.classList.toggle('ag-right-reading', p.rightReadingEnabled !== false);
+        try { window.__agUpdateReadingMask?.(); } catch (error) {}
+      }
+      if (typeof p.rightReadingBg === 'string' && /^#[0-9a-f]{6}$/i.test(p.rightReadingBg.trim())) {
+        const h = p.rightReadingBg.trim().slice(1);
+        const rgb = parseInt(h.slice(0, 2), 16) + ', ' + parseInt(h.slice(2, 4), 16) + ', ' + parseInt(h.slice(4, 6), 16);
+        style.setProperty('--ag-right-reading-rgb', rgb);
+      }
+      if (num(p.rightReadingOpacity)) {
+        style.setProperty('--ag-right-reading-alpha', String(Math.max(0.4, Math.min(1, p.rightReadingOpacity))));
+      }
+      if (num(p.rightReadingFontSize)) {
+        style.setProperty('--ag-right-code-size', Math.round(Math.max(12, Math.min(20, p.rightReadingFontSize))) + 'px');
+      }
+      if (typeof p.videoPreviewEnabled === 'boolean') {
+        document.documentElement.classList.toggle('ag-video-preview-disabled', !p.videoPreviewEnabled);
       }
       document.dispatchEvent(new CustomEvent('ag-config-updated', { detail: p }));
     }
@@ -144,15 +186,22 @@ function buildExpression(payload) {
 }
 
 async function applyPayload(payload) {
-  const ws = await connect();
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  const list = await connectAll();
+  if (!list.length) return false;
   messageId += 1;
-  ws.send(JSON.stringify({
+  const frame = JSON.stringify({
     id: messageId,
     method: 'Runtime.evaluate',
     params: { expression: buildExpression(payload), returnByValue: true }
-  }));
-  return true;
+  });
+  let sent = 0;
+  for (const ws of list) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(frame);
+      sent += 1;
+    }
+  }
+  return sent > 0;
 }
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });

@@ -8,10 +8,14 @@ possible without third-party packages.
 """
 
 import ctypes
+import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
+import threading
 import time
 from ctypes import wintypes
 
@@ -22,6 +26,10 @@ from .base import Backend, BackendError, UnsupportedAction
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+PW_RENDERFULLCONTENT = 0x00000002
+CREATE_NO_WINDOW = 0x08000000
+DETACHED_PROCESS = 0x00000008
 
 ULONG_PTR = wintypes.WPARAM
 
@@ -64,12 +72,25 @@ BUTTON_FLAGS = {
 }
 
 NAMED_KEYS = {
-    "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "shift": 0x10, "ctrl": 0x11,
-    "alt": 0x12, "pause": 0x13, "capslock": 0x14, "esc": 0x1B, "space": 0x20,
-    "pageup": 0x21, "pagedown": 0x22, "end": 0x23, "home": 0x24, "left": 0x25,
-    "up": 0x26, "right": 0x27, "down": 0x28, "printscreen": 0x2C, "insert": 0x2D,
-    "delete": 0x2E, "win": 0x5B, "apps": 0x5D, "numlock": 0x90, "scrolllock": 0x91,
+    "backspace": 0x08, "tab": 0x09, "enter": 0x0D, "return": 0x0D,
+    "shift": 0x10, "lshift": 0xA0, "rshift": 0xA1,
+    "ctrl": 0x11, "control": 0x11, "lctrl": 0xA2, "rctrl": 0xA3,
+    "alt": 0x12, "lalt": 0xA4, "ralt": 0xA5,
+    "pause": 0x13, "capslock": 0x14, "esc": 0x1B, "escape": 0x1B, "space": 0x20,
+    "pageup": 0x21, "pgup": 0x21, "pagedown": 0x22, "pgdn": 0x22,
+    "end": 0x23, "home": 0x24, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+    "printscreen": 0x2C, "prtsc": 0x2C, "snapshot": 0x2C,
+    "insert": 0x2D, "ins": 0x2D, "delete": 0x2E, "del": 0x2E,
+    "win": 0x5B, "lwin": 0x5B, "rwin": 0x5C, "apps": 0x5D,
+    "numlock": 0x90, "scrolllock": 0x91,
     "add": 0x6B, "subtract": 0x6D, "multiply": 0x6A, "divide": 0x6F, "decimal": 0x6E,
+    "semicolon": 0xBA, ";": 0xBA, "equal": 0xBB, "equals": 0xBB, "plus": 0xBB, "=": 0xBB,
+    "comma": 0xBC, ",": 0xBC, "minus": 0xBD, "dash": 0xBD, "-": 0xBD,
+    "period": 0xBE, "dot": 0xBE, ".": 0xBE, "slash": 0xBF, "/": 0xBF,
+    "grave": 0xC0, "backtick": 0xC0, "`": 0xC0,
+    "lbracket": 0xDB, "[": 0xDB, "backslash": 0xDC, "\\": 0xDC,
+    "rbracket": 0xDD, "]": 0xDD, "quote": 0xDE, "apostrophe": 0xDE, "'": 0xDE,
+    "volumemute": 0xAD, "volumedown": 0xAE, "volumeup": 0xAF, "mediaplaypause": 0xB3,
 }
 for _index in range(1, 25):
     NAMED_KEYS["f%d" % _index] = 0x6F + _index
@@ -312,6 +333,209 @@ def _process_name(pid):
     return ""
 
 
+class _LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+
+def _is_real_win32():
+    win_dll_cls = getattr(ctypes, "WinDLL", None)
+    return (
+        os.name == "nt"
+        and isinstance(win_dll_cls, type)
+        and isinstance(user32, win_dll_cls)
+    )
+
+
+def _find_csc():
+    found = shutil.which("csc.exe")
+    if found and os.path.isfile(found):
+        return found
+    for root in (
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        r"C:\Windows",
+    ):
+        for framework in ("Framework64", "Framework"):
+            candidate = os.path.join(
+                root, "Microsoft.NET", framework, "v4.0.30319", "csc.exe"
+            )
+            if os.path.isfile(candidate):
+                return candidate
+    return None
+
+
+class _UiaDaemonClient:
+    """Persistent Per-Monitor-DPIv2 C# UI Automation worker over stdio NDJSON."""
+
+    def __init__(self, cs_path=None):
+        self.cs_path = cs_path or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "win_uia_daemon.cs"
+        )
+        self._lock = threading.Lock()
+        self._proc = None
+        self._next_id = 0
+        self._exe_path = None
+        self._compile_failed = False
+
+    def _bin_dir(self):
+        base = os.environ.get("CU_DATA_DIR") or os.path.join(
+            os.path.expanduser("~"), ".gemini", "memory", "computer-use"
+        )
+        target = os.path.join(base, "bin")
+        try:
+            os.makedirs(target, exist_ok=True)
+            return target
+        except OSError:
+            fallback = os.path.join(tempfile.gettempdir(), "cu-uia-bin")
+            os.makedirs(fallback, exist_ok=True)
+            return fallback
+
+    def available(self):
+        if self._compile_failed or not os.path.isfile(self.cs_path):
+            return False
+        bin_dir = self._bin_dir()
+        exe = os.path.join(bin_dir, "win_uia_daemon.exe")
+        if os.path.isfile(exe):
+            return True
+        return bool(_find_csc())
+
+    def _ensure_exe(self):
+        if self._compile_failed or not os.path.isfile(self.cs_path):
+            return None
+        with open(self.cs_path, "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()[:16]
+        bin_dir = self._bin_dir()
+        exe = os.path.join(bin_dir, "win_uia_daemon.exe")
+        stamp = os.path.join(bin_dir, "win_uia_daemon.sha256")
+        if os.path.isfile(exe) and os.path.isfile(stamp):
+            try:
+                with open(stamp, "r", encoding="utf-8") as handle:
+                    if handle.read().strip() == digest:
+                        self._exe_path = exe
+                        return exe
+            except OSError:
+                pass
+        csc = _find_csc()
+        if not csc:
+            self._compile_failed = True
+            return None
+        wpf_dir = os.path.join(os.path.dirname(csc), "WPF")
+        tmp_exe = exe + ".tmp-%d.exe" % os.getpid()
+        cmd = [csc, "/nologo", "/optimize+", "/target:exe", "/out:" + tmp_exe]
+        if os.path.isdir(wpf_dir):
+            cmd.append("/lib:" + wpf_dir)
+        cmd.extend([
+            "/reference:UIAutomationClient.dll",
+            "/reference:UIAutomationTypes.dll",
+            "/reference:WindowsBase.dll",
+            "/reference:System.Web.Extensions.dll",
+            self.cs_path,
+        ])
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+            timeout=15,
+        )
+        if proc.returncode != 0 or not os.path.isfile(tmp_exe):
+            self._compile_failed = True
+            return None
+        try:
+            os.replace(tmp_exe, exe)
+            with open(stamp, "w", encoding="utf-8") as handle:
+                handle.write(digest)
+            self._exe_path = exe
+            return exe
+        except OSError:
+            if os.path.isfile(exe):
+                self._exe_path = exe
+                return exe
+            self._compile_failed = True
+            return None
+
+    def _start_locked(self):
+        if self._proc and self._proc.poll() is None:
+            return self._proc
+        exe = self._ensure_exe()
+        if not exe:
+            return None
+        self._proc = subprocess.Popen(
+            [exe],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        return self._proc
+
+    def stop(self):
+        with self._lock:
+            proc = self._proc
+            self._proc = None
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    def request(self, payload, timeout=8.0):
+        with self._lock:
+            for attempt in range(2):
+                proc = self._start_locked()
+                if not proc or not proc.stdin or not proc.stdout:
+                    return None
+                self._next_id += 1
+                req = dict(payload)
+                req["id"] = self._next_id
+                try:
+                    proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
+                    proc.stdin.flush()
+                except OSError:
+                    self._reset_proc_locked()
+                    continue
+
+                result_box = []
+                err_box = []
+
+                def _read():
+                    try:
+                        line = proc.stdout.readline()
+                        result_box.append(line)
+                    except Exception as exc:
+                        err_box.append(exc)
+
+                reader = threading.Thread(target=_read, daemon=True)
+                reader.start()
+                reader.join(timeout)
+                if reader.is_alive() or err_box or not result_box or not result_box[0]:
+                    self._reset_proc_locked()
+                    if attempt == 0:
+                        continue
+                    raise BackendError("UIA daemon timed out or exited unexpectedly")
+                try:
+                    return json.loads(result_box[0])
+                except ValueError as exc:
+                    self._reset_proc_locked()
+                    if attempt == 0:
+                        continue
+                    raise BackendError("UIA daemon returned malformed JSON: %s" % exc)
+        return None
+
+    def _reset_proc_locked(self):
+        proc = self._proc
+        self._proc = None
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
 class WindowsBackend(Backend):
     platform = "windows"
     display_name = "Windows"
@@ -326,15 +550,17 @@ class WindowsBackend(Backend):
             ),
             "win_uia.ps1",
         )
+        self._uia_daemon = _UiaDaemonClient() if _is_real_win32() else None
+        daemon_ready = bool(self._uia_daemon and self._uia_daemon.available())
         self._ps_available = bool(
-            os.path.isfile(self._ps_script) and self._find_powershell()
+            daemon_ready or (os.path.isfile(self._ps_script) and self._find_powershell())
         )
+        self._last_agent_tick = 0
+        self._last_agent_point = None
 
     # -- helpers -----------------------------------------------------------
     @staticmethod
     def _find_powershell():
-        import shutil
-
         for name in ("powershell.exe", "powershell", "pwsh.exe", "pwsh"):
             found = shutil.which(name)
             if found:
@@ -342,6 +568,7 @@ class WindowsBackend(Backend):
         return None
 
     def capabilities(self):
+        using_daemon = bool(self._uia_daemon and self._uia_daemon.available())
         return {
             "platform": self.platform,
             "display": True,
@@ -352,12 +579,66 @@ class WindowsBackend(Backend):
             "ui_tree": self._ps_available,
             "clipboard": True,
             "dpi_awareness": self.dpi_mode,
+            "uia_backend": "csharp-daemon" if using_daemon else ("powershell" if self._ps_available else "none"),
             "notes": (
-                "Accessibility tree uses UI Automation through PowerShell."
-                if self._ps_available
-                else "UI Automation bridge unavailable; use screenshots and coordinates."
+                "Accessibility tree uses persistent Per-Monitor-DPIv2 C# UIA daemon."
+                if (self._ps_available and using_daemon)
+                else (
+                    "Accessibility tree uses UI Automation through PowerShell."
+                    if self._ps_available
+                    else "UI Automation bridge unavailable; use screenshots and coordinates."
+                )
             ),
         }
+
+    def _courtesy_wait(self, max_wait_s=0.55):
+        if os.environ.get("CU_COURTESY_LOCK", "1").strip().lower() in ("0", "false", "off", "no"):
+            return
+        if not _is_real_win32():
+            return
+        get_last = getattr(user32, "GetLastInputInfo", None)
+        get_tick = getattr(kernel32, "GetTickCount", None)
+        if not get_last or not get_tick:
+            return
+        deadline = time.monotonic() + max_wait_s
+        while time.monotonic() < deadline:
+            info = _LASTINPUTINFO()
+            info.cbSize = ctypes.sizeof(_LASTINPUTINFO)
+            if not get_last(ctypes.byref(info)):
+                return
+            now_tick = int(get_tick()) & 0xFFFFFFFF
+            last_tick = int(info.dwTime) & 0xFFFFFFFF
+            idle_ms = (now_tick - last_tick) & 0xFFFFFFFF
+            # Only yield if human input occurred meaningfully *after* our own last SendInput
+            agent_delta = (last_tick - (self._last_agent_tick & 0xFFFFFFFF)) & 0xFFFFFFFF
+            human_recent = (
+                idle_ms < 250
+                and self._last_agent_tick > 0
+                and 40 < agent_delta < 0x80000000
+            )
+            cursor_moved = False
+            if self._last_agent_point is not None and idle_ms < 250:
+                pt = wintypes.POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    dx = abs(int(pt.x) - int(self._last_agent_point[0]))
+                    dy = abs(int(pt.y) - int(self._last_agent_point[1]))
+                    if dx > 12 or dy > 12:
+                        cursor_moved = True
+            if not (human_recent or cursor_moved):
+                return
+            time.sleep(0.04)
+
+    def _mark_agent_actuated(self, point=None):
+        if _is_real_win32():
+            get_tick = getattr(kernel32, "GetTickCount", None)
+            if get_tick:
+                self._last_agent_tick = int(get_tick()) & 0xFFFFFFFF
+            if point is None:
+                pt = wintypes.POINT()
+                if user32.GetCursorPos(ctypes.byref(pt)):
+                    point = (int(pt.x), int(pt.y))
+        if point is not None:
+            self._last_agent_point = (int(point[0]), int(point[1]))
 
     def screen_info(self):
         vx, vy, vw, vh = _virtual_screen()
@@ -443,14 +724,40 @@ class WindowsBackend(Backend):
         if user32.IsIconic(hwnd):
             user32.ShowWindow(hwnd, SW_RESTORE)
         if not user32.SetForegroundWindow(hwnd):
-            # The foreground lock rejects background activation; a synthetic
-            # ALT press is the documented way to release it.
-            _send([_input_key(VK_MENU)])
-            raised = bool(user32.SetForegroundWindow(hwnd))
-            _send([_input_key(VK_MENU, 0, KEYEVENTF_KEYUP)])
-            if not raised:
+            # AttachThreadInput / BringWindowToTop without synthetic Alt (VK_MENU)
+            # so target application menu bars are never accidentally triggered.
+            attached = False
+            fg_tid = 0
+            cur_tid = 0
+            attach_fn = getattr(user32, "AttachThreadInput", None)
+            get_tid_fn = getattr(kernel32, "GetCurrentThreadId", None)
+            allow_fn = getattr(user32, "AllowSetForegroundWindow", None)
+            if allow_fn:
+                try:
+                    allow_fn(-1)
+                except (AttributeError, OSError):
+                    pass
+            fg = user32.GetForegroundWindow()
+            if fg and attach_fn and get_tid_fn:
+                try:
+                    fg_tid = int(user32.GetWindowThreadProcessId(fg, None))
+                    cur_tid = int(get_tid_fn())
+                    if fg_tid and cur_tid and fg_tid != cur_tid:
+                        attached = bool(attach_fn(cur_tid, fg_tid, True))
+                except (AttributeError, OSError):
+                    attached = False
+            try:
                 user32.BringWindowToTop(hwnd)
-        time.sleep(0.15)
+                raised = bool(user32.SetForegroundWindow(hwnd))
+                if not raised:
+                    user32.BringWindowToTop(hwnd)
+            finally:
+                if attached and attach_fn:
+                    try:
+                        attach_fn(cur_tid, fg_tid, False)
+                    except (AttributeError, OSError):
+                        pass
+        time.sleep(0.12)
         return self.resolve_window(window["id"])
 
     def window_at(self, x, y):
@@ -493,7 +800,7 @@ class WindowsBackend(Backend):
         return None
 
     # -- capture -----------------------------------------------------------
-    def capture_screenshot(self, path, region=None, max_width=None):
+    def capture_screenshot(self, path, region=None, max_width=None, hwnd=None):
         if region:
             x, y, width, height = (int(value) for value in region)
         else:
@@ -507,14 +814,23 @@ class WindowsBackend(Backend):
         memory_dc = gdi32.CreateCompatibleDC(screen_dc)
         bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
         if not memory_dc or not bitmap:
+            if memory_dc:
+                gdi32.DeleteDC(memory_dc)
             user32.ReleaseDC(None, screen_dc)
             raise BackendError("screenshot unavailable: could not allocate a capture surface")
         previous = gdi32.SelectObject(memory_dc, bitmap)
         try:
-            if not gdi32.BitBlt(
-                memory_dc, 0, 0, width, height, screen_dc, x, y, SRCCOPY | CAPTUREBLT
-            ):
-                raise BackendError("screenshot unavailable: BitBlt failed (WinError %d)" % ctypes.get_last_error())
+            captured_offscreen = False
+            if hwnd is not None and _is_real_win32():
+                print_win = getattr(user32, "PrintWindow", None)
+                target_hwnd = wintypes.HWND(int(hwnd))
+                if print_win and not user32.IsIconic(target_hwnd):
+                    try:
+                        if print_win(target_hwnd, memory_dc, PW_RENDERFULLCONTENT):
+                            captured_offscreen = True
+                    except (AttributeError, OSError):
+                        captured_offscreen = False
+
             info = BITMAPINFO()
             info.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
             info.bmiHeader.biWidth = width
@@ -523,11 +839,25 @@ class WindowsBackend(Backend):
             info.bmiHeader.biBitCount = 32
             info.bmiHeader.biCompression = 0
             buffer = ctypes.create_string_buffer(width * height * 4)
-            scanned = gdi32.GetDIBits(
-                memory_dc, bitmap, 0, height, buffer, ctypes.byref(info), 0
-            )
-            if not scanned:
-                raise BackendError("GetDIBits failed (WinError %d)" % ctypes.get_last_error())
+
+            if captured_offscreen:
+                scanned = gdi32.GetDIBits(
+                    memory_dc, bitmap, 0, height, buffer, ctypes.byref(info), 0
+                )
+                # DirectX/hardware windows may leave PrintWindow all-zero; fall back to BitBlt
+                if not scanned or not any(memoryview(buffer.raw)[::128]):
+                    captured_offscreen = False
+
+            if not captured_offscreen:
+                if not gdi32.BitBlt(
+                    memory_dc, 0, 0, width, height, screen_dc, x, y, SRCCOPY | CAPTUREBLT
+                ):
+                    raise BackendError("screenshot unavailable: BitBlt failed (WinError %d)" % ctypes.get_last_error())
+                scanned = gdi32.GetDIBits(
+                    memory_dc, bitmap, 0, height, buffer, ctypes.byref(info), 0
+                )
+                if not scanned:
+                    raise BackendError("GetDIBits failed (WinError %d)" % ctypes.get_last_error())
         finally:
             gdi32.SelectObject(memory_dc, previous)
             gdi32.DeleteObject(bitmap)
@@ -542,12 +872,14 @@ class WindowsBackend(Backend):
         png = encode_png(
             width, height, buffer.raw, stride=width * 4, bottom_up=False, step=step
         )
+        if path is None:
+            return png
         with open(path, "wb") as handle:
             handle.write(png)
         return path
 
     # -- input -------------------------------------------------------------
-    def move_mouse(self, x, y, duration_ms=0):
+    def _move_raw(self, x, y, duration_ms=0):
         nx, ny = _to_absolute(int(x), int(y))
         flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
         if duration_ms and duration_ms > 0:
@@ -559,8 +891,14 @@ class WindowsBackend(Backend):
                 ax, ay = _to_absolute(px, py)
                 _send([_input_mouse(flags, ax, ay)])
                 time.sleep(max(0.001, duration_ms / 1000.0 / steps))
+            self._mark_agent_actuated((x, y))
             return
         _send([_input_mouse(flags, nx, ny)])
+        self._mark_agent_actuated((x, y))
+
+    def move_mouse(self, x, y, duration_ms=0):
+        self._courtesy_wait()
+        self._move_raw(x, y, duration_ms=duration_ms)
 
     def cursor_position(self):
         point = wintypes.POINT()
@@ -568,18 +906,21 @@ class WindowsBackend(Backend):
         return (point.x, point.y)
 
     def click(self, x, y, button="left", count=1):
+        self._courtesy_wait()
         down, up = BUTTON_FLAGS.get(button, BUTTON_FLAGS["left"])
-        self.move_mouse(x, y)
+        self._move_raw(x, y)
         time.sleep(0.02)
         events = []
         for _ in range(max(1, int(count))):
             events.append(_input_mouse(down))
             events.append(_input_mouse(up))
         _send(events)
+        self._mark_agent_actuated((x, y))
 
     def drag(self, from_x, from_y, to_x, to_y, button="left", duration_ms=400):
+        self._courtesy_wait()
         down, up = BUTTON_FLAGS.get(button, BUTTON_FLAGS["left"])
-        self.move_mouse(from_x, from_y)
+        self._move_raw(from_x, from_y)
         time.sleep(0.05)
         _send([_input_mouse(down)])
         steps = max(3, min(80, int(duration_ms / 12) or 3))
@@ -598,10 +939,12 @@ class WindowsBackend(Backend):
             )
             time.sleep(max(0.005, duration_ms / 1000.0 / steps))
         _send([_input_mouse(up)])
+        self._mark_agent_actuated((to_x, to_y))
 
     def scroll(self, amount, x=None, y=None):
+        self._courtesy_wait()
         if x is not None and y is not None:
-            self.move_mouse(x, y)
+            self._move_raw(x, y)
             time.sleep(0.02)
         steps = max(1, int(abs(int(amount))))
         delta = WHEEL_DELTA if int(amount) > 0 else -WHEEL_DELTA
@@ -612,8 +955,10 @@ class WindowsBackend(Backend):
         _send(
             [_input_mouse(MOUSEEVENTF_WHEEL, 0, 0, wheel_data) for _ in range(steps)]
         )
+        self._mark_agent_actuated((x, y) if x is not None and y is not None else None)
 
     def type_text(self, text, interval_ms=0):
+        self._courtesy_wait()
         pending = []
 
         def flush():
@@ -641,8 +986,10 @@ class WindowsBackend(Backend):
             if interval_ms:
                 time.sleep(max(0.0, interval_ms / 1000.0))
         flush()
+        self._mark_agent_actuated()
 
     def press_keys(self, keys):
+        self._courtesy_wait()
         combo = normalize_combo(keys)
         if not combo:
             raise BackendError("no keys were supplied")
@@ -667,6 +1014,7 @@ class WindowsBackend(Backend):
             vk = NAMED_KEYS[name]
             events.append(_input_key(vk, 0, _extended(name) | KEYEVENTF_KEYUP))
         _send(events)
+        self._mark_agent_actuated()
 
     # -- clipboard ---------------------------------------------------------
     def clipboard(self, action, text=None):
@@ -715,17 +1063,33 @@ class WindowsBackend(Backend):
 
     # -- launch ------------------------------------------------------------
     def open_app(self, target):
-        if os.path.exists(target) or re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", target):
+        cleaned = str(target or "").strip()
+        if not cleaned or "\x00" in cleaned or "\n" in cleaned or "\r" in cleaned:
+            raise BackendError("invalid open_app target")
+        if os.path.exists(cleaned) or re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", cleaned):
             try:
-                os.startfile(target)  # noqa: S606 - deliberate shell-free open
+                os.startfile(cleaned)  # noqa: S606 - deliberate shell-free open
+                return target
             except (OSError, AttributeError) as exc:
                 raise BackendError("could not open %s: %s" % (target, exc))
-        else:
+        resolved = shutil.which(cleaned)
+        if resolved and not re.search(r"[&|><^%]", cleaned):
             try:
-                subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
+                subprocess.Popen(
+                    [resolved],
+                    close_fds=True,
+                    creationflags=(DETACHED_PROCESS | CREATE_NO_WINDOW) if os.name == "nt" else 0,
+                )
+                return target
             except OSError as exc:
                 raise BackendError("could not launch %s: %s" % (target, exc))
-        return target
+        if hasattr(os, "startfile") and not re.search(r"[&|><^%]", cleaned):
+            try:
+                os.startfile(cleaned)  # noqa: S606 - resolves App Paths without cmd.exe
+                return target
+            except OSError as exc:
+                raise BackendError("could not launch %s: %s" % (target, exc))
+        raise BackendError("could not launch %s: shell-free launcher could not resolve target" % target)
 
     # -- UI Automation bridge ---------------------------------------------
     def _uia(self, mode, **params):
@@ -733,7 +1097,35 @@ class WindowsBackend(Backend):
             raise UnsupportedAction(
                 "UI Automation bridge unavailable; use screenshot plus click coordinates"
             )
+        if self._uia_daemon and self._uia_daemon.available():
+            req = {"op": mode}
+            hwnd_raw = params.get("Handle")
+            if hwnd_raw:
+                try:
+                    req["hwnd"] = int(hwnd_raw)
+                except (TypeError, ValueError):
+                    pass
+            if mode == "tree":
+                req["maxDepth"] = int(params.get("MaxDepth") or 6)
+                req["maxElements"] = int(params.get("MaxElements") or 200)
+            elif mode == "find":
+                req["query"] = params.get("Query") or ""
+                req["elementId"] = params.get("ElementId") or ""
+                req["limit"] = int(params.get("MaxElements") or 20)
+            elif mode == "invoke":
+                req["query"] = params.get("Query") or ""
+                req["elementId"] = params.get("ElementId") or ""
+            resp = self._uia_daemon.request(req)
+            if resp is not None:
+                if not resp.get("ok"):
+                    raise BackendError("UI Automation: %s" % (resp.get("error") or "unknown error"))
+                return resp
+
         shell = self._find_powershell()
+        if not shell or not os.path.isfile(self._ps_script):
+            raise UnsupportedAction(
+                "UI Automation bridge unavailable; use screenshot plus click coordinates"
+            )
         args = [
             shell,
             "-NoProfile",
@@ -746,6 +1138,8 @@ class WindowsBackend(Backend):
             mode,
         ]
         for key, value in params.items():
+            if key == "ElementId":
+                continue
             if value is None or value == "":
                 continue
             args += ["-" + key, str(value)]
@@ -797,13 +1191,21 @@ class WindowsBackend(Backend):
             payload = self._uia("focus")
         except (BackendError, UnsupportedAction):
             return None
-        return payload.get("element")
+        el = payload.get("element")
+        if isinstance(el, dict) and "password" not in el and "isPassword" in el:
+            el["password"] = bool(el.get("isPassword"))
+        return el
 
     def click_element(self, query=None, element_id=None, window_id=None):
-        payload = self._uia("invoke", Query=query or element_id or "", Handle=window_id or "")
+        payload = self._uia(
+            "invoke",
+            Query=query or element_id or "",
+            ElementId=element_id or "",
+            Handle=window_id or "",
+        )
         element = payload.get("element") or {}
         if payload.get("invoked"):
-            return {"element": element, "action": "invoke"}
+            return {"element": element, "action": payload.get("action") or "invoke"}
         rect = element.get("rect") or {}
         if not rect.get("width"):
             raise BackendError(

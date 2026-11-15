@@ -416,7 +416,11 @@
   }
 
   async function fetchSidecar(session) {
-    const response = await fetch(sidecarBase() + "/api/telemetry/session?id=" + encodeURIComponent(session.id), { cache: "no-store" });
+    const token = window.__AG_STARLIGHT_TOKEN__;
+    const response = await fetch(sidecarBase() + "/api/telemetry/session?id=" + encodeURIComponent(session.id), {
+      cache: "no-store",
+      headers: token ? { "X-Starlight-Token": token } : undefined,
+    });
     if (!response.ok) throw new Error("HTTP " + response.status);
     const data = await response.json();
     if (data && data.ok) {
@@ -923,8 +927,11 @@
 
   function bind() {
     ensureStyle();
-    state.timer = setInterval(tick, 1000);
-    state.clockTimer = setInterval(() => { if (!document.hidden) renderClock(); }, 20000);
+    const bus = window.__agStarlightBus;
+    state.timer = bus ? bus.onTick("telemetry-tick", 1000, tick) : setInterval(tick, 1000);
+    state.clockTimer = bus
+      ? bus.onTick("telemetry-clock", 20000, () => { if (!document.hidden) renderClock(); })
+      : setInterval(() => { if (!document.hidden) renderClock(); }, 20000);
     window.addEventListener("resize", () => { positionPopover(); renderClock(); }, { passive: true });
     window.addEventListener("popstate", () => { state.lastPath = location.pathname; tick(); });
     document.addEventListener("visibilitychange", () => {
@@ -967,11 +974,14 @@
   else document.addEventListener("DOMContentLoaded", bind, { once: true });
 
   function dispose() {
-    clearInterval(state.timer);
-    clearInterval(state.clockTimer);
+    if (typeof state.timer === "function") state.timer();
+    else clearInterval(state.timer);
+    if (typeof state.clockTimer === "function") state.clockTimer();
+    else clearInterval(state.clockTimer);
     teardown();
     removeNode(STYLE_ID);
     removeNode(TOAST_ID);
+    delete window.__agTelemetryInstalled;
   }
 
   window.__agTelemetryDispose = dispose;

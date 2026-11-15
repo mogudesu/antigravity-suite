@@ -283,8 +283,8 @@ def main():
                           popup_text.get("title") == "antigravity浏览器控制 · 谷谷嘎嘎",
                           json.dumps(popup_text, ensure_ascii=False))
                     check("弹窗头部显示新名称与谷谷嘎嘎品牌",
-                          popup_text.get("name") == "antigravity浏览器控制" and
-                          popup_text.get("brand") == "谷谷嘎嘎",
+                          (popup_text.get("name") or "").replace(" ", "") == "antigravity浏览器控制" and
+                          (popup_text.get("brand") or "").strip() == "谷谷嘎嘎",
                           json.dumps(popup_text, ensure_ascii=False))
                 except Exception as e:  # noqa: BLE001
                     check("弹窗可以打开", False, str(e))
@@ -355,10 +355,14 @@ def main():
             after = status_now()
             check("代理页不是用户原标签页", lease_id != user_tab.get("id"),
                   f"lease={lease_id} user={user_tab.get('id')}")
-            check("代理页已在用户窗口内可见",
-                  after.get("activeTab", {}).get("id") == lease_id and
-                  after.get("leaseWindow", {}).get("id") == user_tab.get("windowId"),
-                  json.dumps({"active": after.get("activeTab"), "window": after.get("leaseWindow")}, ensure_ascii=False))
+            check("代理页在专属后台窗口且不抢焦点",
+                  after.get("leaseWindow", {}).get("focused") is False and
+                  after.get("leaseWindow", {}).get("id") != user_tab.get("windowId") and
+                  after.get("leaseTab", {}).get("active") is True and
+                  after.get("activeTab", {}).get("id") == user_tab.get("id"),
+                  json.dumps({"leaseWindow": after.get("leaseWindow"),
+                              "leaseTab": after.get("leaseTab"),
+                              "activeTab": after.get("activeTab")}, ensure_ascii=False))
             check("用户原标签页仍打开且未被改写",
                   any(t.get("id") == user_tab.get("id") and t.get("url") == user_url for t in tabs_list()),
                   json.dumps([(t.get("id"), t.get("url")) for t in tabs_list()], ensure_ascii=False))
@@ -419,9 +423,14 @@ def main():
             check("新页与旧页在同一标签组",
                   new_group.get("id") == group.get("id") and new_group.get("title") == "谷谷嘎嘎控制中",
                   json.dumps(new_group, ensure_ascii=False))
-            check("新页已激活可见",
-                  switched.get("activeTab", {}).get("id") == new_tab,
-                  json.dumps(switched.get("activeTab"), ensure_ascii=False))
+            check("新页在后台窗口内激活、用户标签不变",
+                  (switched.get("leaseTab") or {}).get("id") == new_tab and
+                  (switched.get("leaseTab") or {}).get("active") is True and
+                  (switched.get("leaseWindow") or {}).get("focused") is False and
+                  (switched.get("activeTab") or {}).get("id") == user_tab.get("id"),
+                  json.dumps({"leaseTab": switched.get("leaseTab"),
+                              "leaseWindow": switched.get("leaseWindow"),
+                              "activeTab": switched.get("activeTab")}, ensure_ascii=False))
             check("用户原标签页仍在且未被改写",
                   any(t.get("id") == user_tab.get("id") and t.get("url") == user_url for t in tabs_list()))
             tabs_now = set(switched.get("cdpAttachedTabs") or [])

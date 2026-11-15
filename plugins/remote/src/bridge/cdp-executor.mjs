@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { discoverWorkbench } from './port-discovery.mjs';
+import { isAntigravityRunning, launchAntigravity } from './launcher.mjs';
 
 export class Mutex {
   constructor() {
@@ -43,6 +44,24 @@ export class CdpError extends Error {}
 export class CdpDisconnected extends CdpError {}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function discoveryFailureMessage(found, launch = null) {
+  const launched = Boolean(launch?.ok);
+  if (found.reason === 'no-port-file') {
+    if (launch?.reason === 'exe-not-found') {
+      return '没找到 Antigravity.exe，也没读到 DevToolsActivePort：请确认 Antigravity 已安装，或手动启动后再试';
+    }
+    return launched
+      ? '没找到 DevToolsActivePort：Antigravity 正在启动，请等窗口出现后再发一次'
+      : '没找到 DevToolsActivePort：Antigravity 没在运行（发消息会自动拉起；也可以手动启动后再试）';
+  }
+  if (found.reason === 'browser-down') {
+    return launched
+      ? `Antigravity 的调试端口 ${found.port} 还没起来：已自动打开客户端，请等窗口加载完再发一次`
+      : `Antigravity 的调试端口 ${found.port} 没有响应（DevToolsActivePort 多半是上次留下的旧文件）：请启动 Antigravity 后再试`;
+  }
+  return `CDP 端口 ${found.port} 在，但工作台页面还没就绪：Antigravity 正在启动，请稍后重试`;
+}
 
 export class CdpClient {
   constructor(wsUrl, { callTimeout = 20000 } = {}) {
@@ -229,10 +248,22 @@ const convRows = () => { const seen = new Set(); const out = [];
     if (!id || seen.has(id)) continue; seen.add(id); out.push(el);
   } return out; };
 const cleanModel = (t) => String(t || '').replace(/\\s+/g, ' ')
-  .replace(/\\s*(New|Notice|Beta|Preview)\\s*$/i, '').trim();
+  .replace(/\\s*(New|Notice|Beta|Preview|Unavailable)\\s*$/i, '').trim();
+const readTriggerModel = () => {
+  const trigger = first('${SEL.modelTrigger}');
+  if (!trigger) return { text: '', aria: '', raw: '' };
+  const aria = String(trigger.getAttribute('aria-label') || '');
+  const m = aria.match(/current:\\s*(.+)$/i);
+  const ariaModel = m ? cleanModel(m[1]) : '';
+  const textModel = cleanModel(trigger.innerText);
+  return { text: textModel, aria: ariaModel, raw: ariaModel || textModel };
+};
 const modelItems = () => { const menu = first('${SEL.modelMenu}'); if (!menu) return [];
   return qsa('[role="menuitem"]', menu).filter(vis).filter((el) => {
-    const label = cleanModel(el.innerText);
+    if (el.getAttribute('aria-disabled') === 'true') return false;
+    const raw = String(el.innerText || '').replace(/\\s+/g, ' ').trim();
+    if (/\\bUnavailable\\s*$/i.test(raw)) return false;
+    const label = cleanModel(raw);
     return label && !/^(View Usage|使用量|查看用量|管理模型|Manage models?)$/i.test(label);
   }); };
 `;
@@ -246,7 +277,7 @@ const input = first('${SEL.input}');
 const send = first('${SEL.send}');
 const cancel = first('${SEL.cancel}') ||
   first('[aria-label="Stop execution"], [data-testid="status-task-running"], button[aria-label*="取消"]');
-const trigger = first('${SEL.modelTrigger}');
+const triggerInfo = readTriggerModel();
 const row = convRows().find((el) => el.getAttribute('data-selected') === 'true');
 const menu = first('${SEL.modelMenu}');
 return {
@@ -262,7 +293,8 @@ return {
   cancelVisible: Boolean(cancel),
   // 输入框为空时发送按钮本来就不渲染，绝不能据此判定"正在生成"
   busy: Boolean(cancel),
-  model: trigger ? cleanModel(trigger.innerText) : '',
+  model: triggerInfo.raw,
+  modelDisplay: triggerInfo.text,
   menuOpen: Boolean(menu),
 };
 `);
@@ -318,15 +350,130 @@ return { ok: true };
 `);
 
 const JS_MODEL_ITEMS = script(`
-const trigger = first('${SEL.modelTrigger}');
+const triggerInfo = readTriggerModel();
 const items = modelItems();
 return {
   ok: true,
-  current: trigger ? cleanModel(trigger.innerText) : '',
-  items: items.map((el) => { const r = el.getBoundingClientRect();
-    return { label: cleanModel(el.innerText), x: r.left + r.width / 2, y: r.top + r.height / 2 }; }),
+  current: triggerInfo.raw,
+  currentDisplay: triggerInfo.text,
+  items: items.map((el) => {
+    const r = el.getBoundingClientRect();
+    const effortGroup = el.querySelector('[data-testid="model-selector-effort-group"]');
+    return {
+      label: cleanModel(el.innerText),
+      base: effortGroup?.dataset?.modelBase || '',
+      hasSubmenu: el.getAttribute('aria-haspopup') === 'menu' || Boolean(effortGroup),
+      x: r.left + r.width / 2,
+      y: r.top + r.height / 2,
+    };
+  }),
 };
 `);
+
+const JS_LIST_MODELS_LIVE = `(async () => {
+  ${PRELUDE}
+  const triggerInfo = readTriggerModel();
+  const token = window.__APP_CONFIG__ && window.__APP_CONFIG__.csrfToken;
+  if (!token) {
+    return { ok: false, reason: 'no-csrf-token', currentRaw: triggerInfo.raw, currentDisplay: triggerInfo.text };
+  }
+  const payload = new TextEncoder().encode('{}');
+  const frame = new Uint8Array(5 + payload.length);
+  new DataView(frame.buffer).setUint32(1, payload.length, false);
+  frame.set(payload, 5);
+  const res = await fetch('/exa.language_server_pb.LanguageServerService/GetUserStatus', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'content-type': 'application/grpc-web+json',
+      'x-grpc-web': '1',
+      'x-codeium-csrf-token': token,
+      'x-user-agent': 'CONNECT_ES_USER_AGENT',
+    },
+    body: frame,
+  });
+  if (!res.ok) {
+    return { ok: false, reason: 'ls-http-' + res.status, currentRaw: triggerInfo.raw, currentDisplay: triggerInfo.text };
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  let off = 0;
+  let msg = null;
+  while (off + 5 <= buf.length) {
+    const len = ((buf[off + 1] << 24) | (buf[off + 2] << 16) | (buf[off + 3] << 8) | buf[off + 4]) >>> 0;
+    const start = off + 5;
+    off = start + len;
+    if (len > 0 && off <= buf.length) {
+      try { msg = JSON.parse(new TextDecoder().decode(buf.subarray(start, off))); } catch {}
+    }
+  }
+  const data = msg?.userStatus?.cascadeModelConfigData;
+  if (!data || !Array.isArray(data.clientModelConfigs)) {
+    return { ok: false, reason: 'no-model-configs', currentRaw: triggerInfo.raw, currentDisplay: triggerInfo.text };
+  }
+  return {
+    ok: true,
+    currentRaw: triggerInfo.raw,
+    currentDisplay: triggerInfo.text,
+    configs: data.clientModelConfigs.map((c) => ({
+      label: String(c.label || ''),
+      modelId: String(c.modelId || ''),
+      model: String(c.modelOrAlias?.model || ''),
+      disabled: Boolean(c.disabled),
+      tagTitle: String(c.tagTitle || ''),
+      quota: typeof c.quotaInfo?.remainingFraction === 'number' ? c.quotaInfo.remainingFraction : null,
+      resetTime: String(c.quotaInfo?.resetTime || ''),
+    })),
+    sorts: Array.isArray(data.clientModelSorts) ? data.clientModelSorts : [],
+  };
+})()`;
+
+const JS_PICK_EFFORT = (baseMatch, effort) => `(async () => {
+  ${PRELUDE}
+  const menu = qsa('${SEL.modelMenu}').filter(vis).find((n) => n.querySelector('[data-testid="model-selector-panel"]')) || first('${SEL.modelMenu}');
+  if (!menu) return { ok: false, reason: 'no-menu' };
+  const wantBase = ${JSON.stringify(baseMatch)}.toLowerCase();
+  const rows = qsa('[role="menuitem"]', menu).filter(vis);
+  const row = rows.find((el) => {
+    const groupBase = (el.querySelector('[data-testid="model-selector-effort-group"]')?.dataset?.modelBase || '').trim().toLowerCase();
+    const label = cleanModel(el.innerText).toLowerCase();
+    return (groupBase && groupBase === wantBase) || label === wantBase || label.startsWith(wantBase);
+  });
+  if (!row) return { ok: false, reason: 'no-row' };
+  const r = row.getBoundingClientRect();
+  const opts = { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 1, pointerType: 'mouse' };
+  row.dispatchEvent(new PointerEvent('pointerenter', { ...opts, bubbles: false }));
+  row.dispatchEvent(new PointerEvent('pointerover', opts));
+  row.dispatchEvent(new PointerEvent('pointermove', opts));
+  row.dispatchEvent(new MouseEvent('mouseenter', { ...opts, bubbles: false }));
+  row.dispatchEvent(new MouseEvent('mouseover', opts));
+  row.dispatchEvent(new MouseEvent('mousemove', opts));
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  row.focus();
+  if (row.getAttribute('aria-expanded') !== 'true') {
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true }));
+  }
+  let submenu = null;
+  for (let i = 0; i < 10; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const controls = row.getAttribute('aria-controls');
+    if (controls) {
+      const candidate = document.getElementById(controls);
+      if (candidate && candidate !== menu) { submenu = candidate; break; }
+    }
+    const found = qsa('[role="menu"]').find((node) => node !== menu && node.querySelector('[data-testid="model-selector-effort-option"]'));
+    if (found) { submenu = found; break; }
+  }
+  if (!submenu) return { ok: false, reason: 'no-submenu' };
+  const wantEffort = ${JSON.stringify(effort)}.toLowerCase();
+  const aliasMap = { minimal: ['minimal', '极低'], low: ['low', '低'], medium: ['medium', '中'], high: ['high', '高'], xhigh: ['xhigh', '极高'] };
+  const names = aliasMap[wantEffort] || [wantEffort];
+  const optEl = submenu.querySelector('[data-testid="model-selector-effort-option"][data-effort="' + wantEffort + '"]');
+  const target = optEl?.closest('[role="menuitem"], [role="menuitemradio"]') ||
+    qsa('[role="menuitem"], [role="menuitemradio"]', submenu).find((item) => names.includes(norm(item.innerText).toLowerCase()));
+  if (!target) return { ok: false, reason: 'no-effort-option' };
+  target.click();
+  return { ok: true };
+})()`;
 
 const JS_CLOSE_MENU = script(`
 const menu = first('${SEL.modelMenu}');
@@ -377,29 +524,72 @@ return { ok: true, count: buttons.length, clicked: norm(target.innerText) };
 // ---------------------------------------------------------------- Workbench
 
 export class Workbench {
-  constructor({ mutex = new Mutex(), logger = console, portFile } = {}) {
+  constructor({ mutex = new Mutex(), logger = console, portFile, autoLaunch = process.env.AG_AUTO_LAUNCH !== '0' } = {}) {
     this.mutex = mutex;
     this.logger = logger;
     this.portFile = portFile;
+    this.autoLaunch = autoLaunch;
     this.client = null;
     this.target = null;
     this.port = 0;
+    this._launchAt = 0;
+    this._launchResult = null;
+    this._ensuring = null;
   }
 
   get connected() {
     return Boolean(this.client?.connected);
   }
 
-  async ensure() {
+  async ensure({ waitMs = 0 } = {}) {
     if (this.connected) return this.client;
-    const found = await discoverWorkbench({ portFile: this.portFile });
-    if (!found.ok) {
-      throw new CdpError(
-        found.reason === 'no-port-file'
-          ? '没找到 DevToolsActivePort：Antigravity 没开远程调试端口（重启客户端即可，插件会自动带上参数）'
-          : 'CDP 端口在，但没找到工作台页面',
-      );
+    if (this._ensuring) return this._ensuring;
+    this._ensuring = (async () => {
+      const found = await discoverWorkbench({ portFile: this.portFile, waitMs });
+      if (!found.ok) throw new CdpError(discoveryFailureMessage(found, this._launchResult));
+      return this._attach(found);
+    })();
+    try {
+      return await this._ensuring;
+    } finally {
+      this._ensuring = null;
     }
+  }
+
+  /**
+   * 用户动作入口：等 Antigravity 就绪；没运行时自动拉起再等窗口。
+   * 开机后 hub 先起、Antigravity 还没启动的窗口期就靠这里兜住。
+   */
+  async ensureReady({ waitMs = 30000 } = {}) {
+    if (this.connected) return this.client;
+    const deadline = Date.now() + Math.max(0, waitMs);
+    let found = await discoverWorkbench({ portFile: this.portFile, waitMs: Math.min(1200, waitMs) });
+    if (!found.ok && (found.reason === 'browser-down' || found.reason === 'no-port-file')) {
+      this._launchResult = await this._ensureLaunched();
+      found = await discoverWorkbench({ portFile: this.portFile, waitMs: Math.max(0, deadline - Date.now()) });
+    } else if (!found.ok) {
+      found = await discoverWorkbench({ portFile: this.portFile, waitMs: Math.max(0, deadline - Date.now()) });
+    }
+    if (!found.ok) throw new CdpError(discoveryFailureMessage(found, this._launchResult));
+    return this._attach(found);
+  }
+
+  /** 只在「确实没在运行」且冷却结束时拉起一次，避免并发消息重复开窗。 */
+  async _ensureLaunched() {
+    if (!this.autoLaunch) return { ok: false, reason: 'disabled' };
+    if (Date.now() - this._launchAt < 120_000) return this._launchResult || { ok: false, reason: 'cooldown' };
+    this._launchAt = Date.now();
+    if (await isAntigravityRunning()) {
+      this._launchResult = { ok: false, reason: 'already-running' };
+      return this._launchResult;
+    }
+    this._launchResult = launchAntigravity();
+    if (this._launchResult.ok) this.logger.info?.(`Antigravity 未运行，已自动拉起：${this._launchResult.exe}`);
+    else this.logger.warn?.(`自动拉起 Antigravity 失败：${this._launchResult.reason}`);
+    return this._launchResult;
+  }
+
+  async _attach(found) {
     this.client?.close();
     this.client = await CdpClient.connect(found.target.wsUrl);
     this.target = found.target;
@@ -534,16 +724,30 @@ export class Workbench {
   }
 
   /**
-   * 读当前可用模型列表（打开菜单读一遍再关掉）。
-   * 面板的下拉就用这个，避免用户手打错模型名。
+   * 实时读取 Antigravity 可用模型列表与当前选中模型：
+   * 1. 优先直接调用本地 LanguageServerService/GetUserStatus + 读取触发器，零闪烁、不弹窗、实时同步；
+   * 2. 拿不到时再回退到旧的打开模型菜单读取路径。
    */
   async listModels({ force = false } = {}) {
     const cached = this._modelsCache;
-    if (!force && cached && Date.now() - cached.at < 60_000) return cached.value;
+    if (!force && cached && Date.now() - cached.at < 2500) return cached.value;
+
+    try {
+      const client = await this.ensure();
+      const live = await client.evaluate(JS_LIST_MODELS_LIVE, { awaitPromise: true });
+      if (live?.ok && Array.isArray(live.configs) && live.configs.length) {
+        const value = normalizeLiveModels(live);
+        this._modelsCache = { at: Date.now(), value };
+        return value;
+      }
+    } catch {
+      /* 降级到菜单读取，若仍不可达则由下面统一抛出或返回 */
+    }
+
     return this.mutex.run(async () => {
       const client = await this.ensure();
       const opened = await client.evaluate(JS_OPEN_MODEL);
-      if (!opened?.ok) return { ok: false, reason: opened?.reason || 'no-model-trigger', current: '', items: [] };
+      if (!opened?.ok) return { ok: false, reason: opened?.reason || 'no-model-trigger', current: '', items: [], models: [] };
       await sleep(450);
       let listing;
       try {
@@ -552,40 +756,82 @@ export class Workbench {
         await client.evaluate(JS_CLOSE_MENU).catch(() => {});
       }
       const items = (listing?.items || []).map((item) => item.label).filter(Boolean);
-      const value = { ok: true, current: listing?.current || '', items };
+      const current = listing?.current || '';
+      const models = items.map((label) => ({
+        label,
+        base: label,
+        effort: extractEffort(label),
+        modelId: '',
+        quota: null,
+        resetTime: '',
+        tag: '',
+        available: true,
+      }));
+      const value = {
+        ok: true,
+        current,
+        currentRaw: listing?.currentDisplay || current,
+        items,
+        models,
+        source: 'dom-menu',
+        updatedAt: Date.now(),
+      };
       this._modelsCache = { at: Date.now(), value };
       return value;
     });
   }
 
-  /** 切模型（菜单项必须真实鼠标点击，JS click 只关菜单）。 */
+  /** 对外公开的切模型入口（持锁并清缓存）。 */
+  async selectModel(label) {
+    return this.mutex.run(async () => this._selectModel(label));
+  }
+
+  /** 切模型（支持直接点击与带思考强度的二级子菜单）。 */
   async _selectModel(label) {
+    this._modelsCache = null;
     const client = await this.ensure();
+    const before = await client.evaluate(JS_STATE).catch(() => null);
+    if (before?.model && sameModelExact(before.model, label)) {
+      return { ok: true, current: before.model, picked: label, unchanged: true };
+    }
+
     const opened = await client.evaluate(JS_OPEN_MODEL);
     if (!opened?.ok) return { ok: false, reason: opened?.reason || 'no-model-trigger' };
-    await sleep(450);
-    let listing;
+    await sleep(380);
     try {
-      listing = await client.evaluate(JS_MODEL_ITEMS);
+      let listing = await client.evaluate(JS_MODEL_ITEMS);
       let items = listing?.items || [];
       if (!items.length) {
         // 菜单刚打开还没渲染完，等一下再读一次
-        await sleep(600);
+        await sleep(550);
         listing = await client.evaluate(JS_MODEL_ITEMS);
         items = listing?.items || [];
       }
       const want = modelKey(label);
       const target =
+        items.find((item) => modelKey(item.base || item.label) === want) ||
         items.find((item) => modelKey(item.label) === want) ||
-        items.find((item) => modelKey(item.label).startsWith(want));
+        items.find((item) => modelKey(item.base || item.label).startsWith(want));
       if (!target) return { ok: false, reason: 'not-found', available: items.map((i) => i.label) };
-      await client.clickAt(target.x, target.y);
-      await sleep(800);
+
+      const wantEffort = extractEffort(label);
+      let pickedViaSubmenu = false;
+      if (target.hasSubmenu && wantEffort) {
+        await client.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: target.x, y: target.y }).catch(() => {});
+        const picked = await client.evaluate(JS_PICK_EFFORT(target.base || target.label, wantEffort), { awaitPromise: true });
+        pickedViaSubmenu = Boolean(picked?.ok);
+      }
+      if (!pickedViaSubmenu) {
+        await client.clickAt(target.x, target.y);
+      }
+      await sleep(750);
     } finally {
-      await client.evaluate(JS_CLOSE_MENU);
+      await client.evaluate(JS_CLOSE_MENU).catch(() => {});
     }
+    this._modelsCache = null;
     const state = await client.evaluate(JS_STATE);
-    return { ok: sameModel(state.model, label), current: state.model, picked: label };
+    const ok = extractEffort(label) ? sameModelExact(state.model, label) : sameModel(state.model, label);
+    return { ok, current: state.model, picked: label };
   }
 
   /**
@@ -723,6 +969,12 @@ export class Workbench {
    */
   async sendPrompt({ conversationId, text, model = '' }) {
     return this.mutex.run(async () => {
+      try {
+        await this.ensureReady();
+      } catch (error) {
+        return { ok: false, stage: 'connect', reason: error?.message || String(error) };
+      }
+
       const switched = conversationId ? await this._switchTo(conversationId) : { ok: true };
       if (!switched.ok) return { ok: false, stage: 'switch', ...switched };
 
@@ -737,7 +989,7 @@ export class Workbench {
         // 读不到当前模型（界面还没渲染完）就别硬切，静默跳过，免得误报
         if (!state.model) {
           modelResult = { ok: true, skipped: true, reason: 'model-unknown' };
-        } else if (!sameModel(state.model, model)) {
+        } else if (!sameModelExact(state.model, model)) {
           modelResult = await this._selectModel(model);
         }
         if (!modelResult.ok) {
@@ -750,7 +1002,14 @@ export class Workbench {
       const submitted = await this._submit(text);
       if (!submitted.ok) return { ok: false, stage: 'submit', ...submitted };
       const after = await this.snapshot();
-      return { ok: true, conversationId: after.conversationId, model: after.model, switched: Boolean(conversationId), via: submitted.via || "mouse" };
+      return {
+        ok: true,
+        conversationId: after.conversationId,
+        model: after.model,
+        modelWarning,
+        switched: Boolean(conversationId),
+        via: submitted.via || 'mouse',
+      };
     });
   }
 
@@ -784,7 +1043,7 @@ export class Workbench {
         modelResult = await this._selectModel(model);
         await sleep(600);
         const state = await this.snapshot();
-        if (!sameModel(state.model, model)) modelResult = await this._selectModel(model);
+        if (!sameModelExact(state.model, model)) modelResult = await this._selectModel(model);
       }
       const state = await this.snapshot();
       return { ok: true, conversationId: state.conversationId, model: state.model, modelOk: modelResult.ok !== false };
@@ -811,16 +1070,44 @@ export class Workbench {
   }
 }
 
-// ---------------------------------------------------------------- 模型名比较
+// ---------------------------------------------------------------- 模型名比较与归一化
 
-export function modelKey(text) {
+const EFFORT_ALIAS = {
+  minimal: 'minimal',
+  极低: 'minimal',
+  low: 'low',
+  低: 'low',
+  medium: 'medium',
+  中: 'medium',
+  high: 'high',
+  高: 'high',
+  xhigh: 'xhigh',
+  极高: 'xhigh',
+};
+
+export function extractEffort(text) {
+  const cleaned = String(text || '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*(New|Notice|Beta|Preview|Unavailable)\s*$/i, '')
+    .trim();
+  const paren = cleaned.match(/\((minimal|low|medium|xhigh|high)\)\s*$/i);
+  if (paren) return EFFORT_ALIAS[paren[1].toLowerCase()] || '';
+  const tail = cleaned.match(/(?:^|\s)(极低|极高|低|中|高|minimal|low|medium|xhigh|high)\s*$/i);
+  if (tail) return EFFORT_ALIAS[tail[1].toLowerCase()] || '';
+  return '';
+}
+
+export function modelBaseName(text) {
   return String(text || '')
     .replace(/\s+/g, ' ')
-    .replace(/\s*(New|Notice|Beta|Preview)\s*$/i, '')
-    .replace(/\s*\((?:minimal|low|medium|high)\)\s*$/i, '')
-    .replace(/\s*(极低|极高|低|中|高|minimal|low|medium|high)\s*$/i, '')
-    .trim()
-    .toLowerCase();
+    .replace(/\s*(New|Notice|Beta|Preview|Unavailable)\s*$/i, '')
+    .replace(/\s*\((?:minimal|low|medium|xhigh|high)\)\s*$/i, '')
+    .replace(/\s*(极低|极高|低|中|高|minimal|low|medium|xhigh|high)\s*$/i, '')
+    .trim();
+}
+
+export function modelKey(text) {
+  return modelBaseName(text).toLowerCase();
 }
 
 export function sameModel(current, expected) {
@@ -828,6 +1115,74 @@ export function sameModel(current, expected) {
   const right = modelKey(expected);
   if (!left || !right) return false;
   return left === right || left.startsWith(right) || right.startsWith(left);
+}
+
+export function sameModelExact(current, expected) {
+  if (!sameModel(current, expected)) return false;
+  const wantEffort = extractEffort(expected);
+  if (!wantEffort) return true;
+  const gotEffort = extractEffort(current);
+  return !gotEffort || gotEffort === wantEffort;
+}
+
+export function normalizeLiveModels(live) {
+  const rawConfigs = Array.isArray(live?.configs) ? live.configs : [];
+  const orderList = [];
+  for (const sortGroup of live?.sorts || []) {
+    for (const grp of sortGroup?.groups || []) {
+      for (const lbl of grp?.modelLabels || []) orderList.push(lbl);
+    }
+  }
+  const byLabel = new Map();
+  for (const cfg of rawConfigs) {
+    if (cfg?.label && !byLabel.has(cfg.label)) byLabel.set(cfg.label, cfg);
+  }
+  const ordered = [];
+  const seen = new Set();
+  for (const lbl of orderList) {
+    const cfg = byLabel.get(lbl);
+    if (cfg && !seen.has(cfg.label)) {
+      seen.add(cfg.label);
+      ordered.push(cfg);
+    }
+  }
+  for (const cfg of rawConfigs) {
+    if (cfg?.label && !seen.has(cfg.label)) {
+      seen.add(cfg.label);
+      ordered.push(cfg);
+    }
+  }
+
+  const available = ordered.filter(
+    (cfg) => !cfg.disabled && String(cfg.tagTitle || '').toLowerCase() !== 'unavailable',
+  );
+  const models = available.map((cfg) => ({
+    label: cfg.label,
+    base: modelBaseName(cfg.label),
+    effort: extractEffort(cfg.label),
+    modelId: cfg.modelId || '',
+    model: cfg.model || '',
+    quota: typeof cfg.quota === 'number' ? Math.max(0, Math.min(1, cfg.quota)) : null,
+    resetTime: cfg.resetTime || '',
+    tag: cfg.tagTitle || '',
+    available: true,
+  }));
+
+  const currentRaw = String(live?.currentRaw || live?.currentDisplay || '').trim();
+  const matched =
+    models.find((m) => sameModelExact(currentRaw, m.label)) ||
+    models.find((m) => sameModel(currentRaw, m.label));
+  const current = matched ? matched.label : currentRaw;
+
+  return {
+    ok: true,
+    current,
+    currentRaw: String(live?.currentDisplay || currentRaw || current),
+    items: models.map((m) => m.label),
+    models,
+    source: 'language-server',
+    updatedAt: Date.now(),
+  };
 }
 
 function normalize(text) {

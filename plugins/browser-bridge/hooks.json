@@ -1,0 +1,19 @@
+{
+  "browser-recording-awareness": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "C:\\PROGRA~1\\nodejs\\node.exe \"C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity-browser-bridge\\scripts\\hooks\\recordings-aware.mjs\"",
+        "timeout": 10
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "C:\\PROGRA~1\\nodejs\\node.exe \"C:\\Users\\25350\\.gemini\\config\\plugins\\antigravity-browser-bridge\\scripts\\hooks\\recordings-aware.mjs\"",
+        "timeout": 10
+      }
+    ]
+  }
+}

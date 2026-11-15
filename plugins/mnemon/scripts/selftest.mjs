@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openEngine } from './lib/engine.mjs';
+import { analyzeTranscriptFile } from './diagnose-transcripts.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(here, '..');
@@ -123,6 +124,31 @@ check('document update keeps one file', engine.listDocuments().length === 1);
 check('document revision kept on update', fs.readdirSync(path.join(tmp, 'documents', '.revisions', 'memory-plugin-design-notes')).length >= 1);
 const docHits = engine.searchDocuments('documents searched first', { limit: 3 });
 check('document search returns a snippet', docHits.length === 1 && docHits[0].snippet.length > 0);
+const zeroDocHits = engine.searchDocuments('xylophone quantum submarine nonexistent', { limit: 3 });
+check('document search returns [] when zero tokens match', zeroDocHits.length === 0, JSON.stringify(zeroDocHits));
+
+// Symmetric Jaccard guard: short overlap inside much longer note must not false-merge
+const longNote = engine.saveMemory({
+  text: 'Deploy checklist covers linting building migrating database schemas verifying healthchecks and notifying Slack before rolling restart',
+  space: 'work',
+});
+const shortNote = engine.saveMemory({
+  text: 'Deploy checklist covers linting',
+  space: 'work',
+});
+check('symmetric Jaccard guard prevents containment false-merge', shortNote.action === 'added' && shortNote.id !== longNote.id, JSON.stringify(shortNote));
+
+// Strategy verification: light-context & scoped
+engine.saveMemory({ text: 'Scoped alpha protocol verifies checksums first', space: 'alpha' });
+engine.saveMemory({ text: 'Scoped beta protocol verifies signatures first', space: 'beta' });
+const prevStrategy = engine.config();
+engine.setConfig({ strategy: 'light-context' });
+const lightCtx = engine.buildTurnContext({ prompt: 'documents searched first', budget: 1000 });
+check('light-context halves budget and omits documents', lightCtx.budgetChars === 500 && lightCtx.documents.length === 0, JSON.stringify({ b: lightCtx.budgetChars, docs: lightCtx.documents.length }));
+engine.setConfig({ strategy: 'scoped', spaces: ['alpha'] });
+const scopedHits = engine.searchMemories('protocol verifies', { limit: 5, touch: false });
+check('scoped strategy restricts searches to config.spaces', scopedHits.length === 1 && scopedHits[0].space === 'alpha', JSON.stringify(scopedHits));
+engine.setConfig({ strategy: prevStrategy.strategy, spaces: [] });
 
 // -------------------------------------------------------------- candidates
 const queued = engine.addCandidate({ text: 'Ada wants Chinese replies by default', reason: 'stated as a preference', source: 'manual' });
@@ -190,6 +216,8 @@ check('backup_verify reports valid', verify.valid === true && verify.memories >=
 
 const dirPack = reopened.backup({ mode: 'dir' });
 check('readable pack written', fs.existsSync(path.join(dirPack.target, 'runtime', 'PERSONA.md')) && fs.existsSync(path.join(dirPack.target, 'mnemon-pack.json')));
+const dirDocText = fs.readFileSync(path.join(dirPack.target, 'documents', 'memory-plugin-design-notes.md'), 'utf8');
+check('dir backup preserves document YAML frontmatter', dirDocText.startsWith('---\n') && dirDocText.includes('tags: ["design"]') && dirDocText.includes('id: memory-plugin-design-notes'), dirDocText.slice(0, 120));
 const target = fs.mkdtempSync(path.join(os.tmpdir(), 'mnemon-import-'));
 const restored = openEngine({ dataDir: target, mirrorDir: path.join(target, 'mirror') });
 const summary = restored.importPack(bundle.target, { mode: 'replace' });
@@ -286,34 +314,32 @@ const runHook = (script, event) => {
 
 const start = runHook('session-start.mjs', { event: 'SessionStart', sessionId: 'selftest' });
 check('SessionStart exits 0 with JSON', start.code === 0 && !!start.json, start.stderr);
-check('SessionStart returns injectSteps[0].systemMessage', !!start.json && typeof start.json.injectSteps[0].systemMessage === 'string' && start.json.injectSteps[0].systemMessage.includes('mnemon-session'), start.stdout);
+check('SessionStart returns nested injectSteps[0].systemMessage.systemMessage',
+  !!start.json &&
+  !!start.json.injectSteps[0].systemMessage &&
+  typeof start.json.injectSteps[0].systemMessage === 'object' &&
+  typeof start.json.injectSteps[0].systemMessage.systemMessage === 'string' &&
+  start.json.injectSteps[0].systemMessage.systemMessage.includes('mnemon-session'),
+  start.stdout);
 check('SessionStart emits no visible userMessage bubble', !!start.json && start.json.injectSteps[0].userMessage === undefined && start.json.userMessage === undefined, start.stdout);
-check('SessionStart injects persona and pinned memory', !!start.json && start.json.injectSteps[0].systemMessage.includes('Mnemosyne') && start.json.injectSteps[0].systemMessage.includes('Pinned memory'), start.stdout.slice(0, 400));
+check('SessionStart injects persona and pinned memory', !!start.json && start.json.injectSteps[0].systemMessage.systemMessage.includes('Mnemosyne') && start.json.injectSteps[0].systemMessage.systemMessage.includes('Pinned memory'), start.stdout.slice(0, 400));
+const startRepeat = runHook('session-start.mjs', { event: 'SessionStart', sessionId: 'selftest-2' });
+check('SessionStart output is byte-for-byte deterministic', start.stdout === startRepeat.stdout, 'SessionStart output varied between calls');
 
-const pre = runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: 'selftest', prompt: 'How should I write commit messages?' });
-check('PreInvocation injects recalled memory', !!pre.json && !!pre.json.injectSteps && pre.json.injectSteps[0].ephemeralMessage.includes('mnemon-recall'), pre.stdout);
-check('PreInvocation uses ephemeralMessage only', !!pre.json && pre.json.injectSteps[0].systemMessage === undefined && pre.json.injectSteps[0].userMessage === undefined, pre.stdout);
-const preRepeat = runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: 'selftest', prompt: 'How should I write commit messages?' });
-check('PreInvocation skips a repeated tool step in the same turn',
-  preRepeat.code === 0 && !!preRepeat.json && preRepeat.json.injectSteps === undefined,
-  preRepeat.stdout.slice(0, 200));
-const preMiss = runHook('pre-invocation.mjs', { event: 'PreInvocation', prompt: 'zzzz unrelated zzzz' });
-check('PreInvocation refreshes resident memory without keyword hits',
-  preMiss.code === 0 && !!preMiss.json && !!preMiss.json.injectSteps &&
-  preMiss.json.injectSteps[0].ephemeralMessage.includes('mnemon-recall') &&
-  preMiss.json.injectSteps[0].ephemeralMessage.includes('Mnemosyne') &&
-  preMiss.json.injectSteps[0].ephemeralMessage.includes('Ada'),
-  preMiss.stdout.slice(0, 400));
-const preLastInput = runHook('pre-invocation.mjs', { event: 'PreInvocation', lastUserInput: 'How should I write commit messages?' });
-check('PreInvocation reads the host lastUserInput field',
-  preLastInput.code === 0 && !!preLastInput.json && !!preLastInput.json.injectSteps &&
-  preLastInput.json.injectSteps[0].ephemeralMessage.includes('mnemon-recall'),
-  preLastInput.stdout.slice(0, 400));
+const pre = runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: 'selftest', lastUserInput: 'How should I write commit messages?' });
+check('PreInvocation returns {} with no ephemeralMessage churn', pre.code === 0 && !!pre.json && pre.json.injectSteps === undefined && Object.keys(pre.json).length === 0, pre.stdout);
+check('PreInvocation stores signature per session', fs.existsSync(path.join(tmp, 'signatures', 'selftest.json')) && !fs.existsSync(path.join(tmp, '.recall-signature.json')), pre.stdout);
+const preSubagent = runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: 'selftest-sub', response: 'assistant internal' });
+check('PreInvocation short-circuits for subagents without user input', preSubagent.code === 0 && !!preSubagent.json && Object.keys(preSubagent.json).length === 0 && !fs.existsSync(path.join(tmp, 'signatures', 'selftest-sub.json')), preSubagent.stdout);
+for (let i = 0; i < 55; i += 1) {
+  runHook('pre-invocation.mjs', { event: 'PreInvocation', sessionId: `cap-${i}`, lastUserInput: `user prompt ${i}` });
+}
+const sigFiles = fs.readdirSync(path.join(tmp, 'signatures')).filter((f) => f.endsWith('.json'));
+check('PreInvocation prunes signature files to <= 50', sigFiles.length <= 50, `count=${sigFiles.length}`);
 
-const post = runHook('post-tool-use.mjs', { event: 'PostToolUse', toolName: 'mnemon_memory_save', toolResult: '{"action":"added","id":"mem_deadbeef","space":"work"}' });
-check('PostToolUse appends a receipt to the result', !!post.json && typeof post.json.overwriteResult === 'string' && post.json.overwriteResult.includes('[mnemon] save: added mem_deadbeef → space work'), post.stdout);
-const postNoResult = runHook('post-tool-use.mjs', { event: 'PostToolUse', toolName: 'mnemon_memory_save' });
-check('PostToolUse never overwrites an unreadable result', !!postNoResult.json && postNoResult.json.overwriteResult === undefined, postNoResult.stdout);
+const post = runHook('post-tool-use.mjs', { event: 'PostToolUse', sessionId: 'selftest-post', toolCall: { name: 'memory_save', result: '{"action":"added","id":"mem_deadbeef","space":"work"}' } });
+check('PostToolUse returns {} without overwriteResult', post.code === 0 && !!post.json && Object.keys(post.json).length === 0 && post.json.overwriteResult === undefined, post.stdout);
+check('PostToolUse reads toolCall.name and records receipt', healedEngine.recentReceipts({ limit: 5 }).items.some((r) => r.session === 'selftest-post' && r.note.includes('added mem_deadbeef')), JSON.stringify(healedEngine.recentReceipts({ limit: 5 }).items));
 
 const stop = runHook('stop.mjs', { event: 'Stop', sessionId: 'selftest', response: 'Done. Nothing to capture here.' });
 check('Stop returns an empty object (no Claude decision field)', !!stop.json && Object.keys(stop.json).length === 0, stop.stdout);
@@ -321,6 +347,15 @@ check('active capture is on by default', healedEngine.config().enhancements.auto
 const beforeCandidates = healedEngine.listCandidates({ limit: 1000 }).total;
 runHook('stop.mjs', { event: 'Stop', sessionId: 'selftest', response: '记住：以后提交信息都用 Conventional Commits，scope 用模块名。' });
 check('active capture queues a candidate', healedEngine.listCandidates({ limit: 1000 }).total > beforeCandidates);
+
+const fakeTranscript = path.join(tmp, 'sample-transcript.jsonl');
+fs.writeFileSync(fakeTranscript, [
+  JSON.stringify({ step_index: 1, type: 'USER_INPUT', source: 'USER_EXPLICIT', content: '记住：以后单元测试一律放在 tests 目录下。' }),
+  JSON.stringify({ step_index: 2, type: 'PLANNER_RESPONSE', source: 'MODEL', content: 'I prefer to always do X and remember this forever.' }),
+].join('\n') + '\n');
+runHook('stop.mjs', { event: 'Stop', sessionId: 'selftest-transcript', transcriptPath: fakeTranscript });
+const txCandidates = healedEngine.listCandidates({ limit: 1000 }).items.filter((c) => c.sessionId === 'selftest-transcript');
+check('Stop parses transcriptPath USER_INPUT and ignores model output', txCandidates.length === 1 && txCandidates[0].text.includes('单元测试一律放在 tests 目录'), JSON.stringify(txCandidates));
 
 const beforeRoleCandidates = healedEngine.listCandidates({ limit: 1000 }).total;
 runHook('stop.mjs', {
@@ -337,9 +372,31 @@ check('role-aware Stop ignores the assistant reply', !roleCandidates.some((c) =>
 check('role-aware Stop still queues exactly the user candidate', roleCandidates.length === 1, JSON.stringify(roleCandidates));
 check('role-aware capture increased the pending pool', healedEngine.listCandidates({ limit: 1000 }).total > beforeRoleCandidates);
 
+// CLI config flag sanitization + coercion
+const cliCfg = spawnSync(process.execPath, [
+  path.join(pluginRoot, 'scripts', 'mnemon.mjs'), 'config',
+  '--data-dir', tmp, '--mirror-dir', mirror,
+  '--searchBudget', '11', '--lightContext', 'true',
+], { env: hookEnv, encoding: 'utf8', timeout: 20000 });
+const savedCliConfig = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8'));
+check('CLI config strips --data-dir/--mirror-dir and coerces types',
+  cliCfg.status === 0 &&
+  savedCliConfig['data-dir'] === undefined &&
+  savedCliConfig['mirror-dir'] === undefined &&
+  savedCliConfig.searchBudget === 11 &&
+  savedCliConfig.enhancements.lightContext === true,
+  JSON.stringify(savedCliConfig));
+
 // ------------------------------------------------------------- MCP server
 const server = spawnSync(process.execPath, [path.join(pluginRoot, 'scripts', 'mcp-server.mjs')], {
-  input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } })}\n${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'status' } })}\n${JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'verify_heal' } })}\n`,
+  input: [
+    JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'memory_admin', arguments: { action: 'status' } } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'memory_admin', arguments: { action: 'verify_heal' } } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'memory_save', arguments: { action: 'remember', text: 'Consolidated MCP save smoke check fact', space: 'work' } } }),
+    JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'memory_recall', arguments: { action: 'search', query: 'Consolidated MCP save' } } }),
+  ].join('\n') + '\n',
   env: hookEnv,
   encoding: 'utf8',
   timeout: 30000,
@@ -355,10 +412,13 @@ const initResponse = responses.find((r) => r && r.id === 1);
 const listResponse = responses.find((r) => r && r.id === 2);
 const callResponse = responses.find((r) => r && r.id === 3);
 const healResponse = responses.find((r) => r && r.id === 4);
-check('MCP server answers initialize', !!initResponse && initResponse.result.serverInfo.name === 'mnemon-memory' && initResponse.result.serverInfo.version === '0.2.0');
-check('MCP server lists 28+ tools', !!listResponse && listResponse.result.tools.length >= 28, listResponse ? String(listResponse.result.tools.length) : 'no response');
-check('MCP tool call returns content', !!callResponse && callResponse.result.content[0].text.includes('mirrorDir') && callResponse.result.content[0].text.includes('PERSONA.md'));
-check('MCP verify_heal tool responds', !!healResponse && /"checked"|"healed"/.test(healResponse.result.content[0].text));
+const saveResponse = responses.find((r) => r && r.id === 5);
+const recallResponse = responses.find((r) => r && r.id === 6);
+check('MCP server answers initialize without forcing per-turn context calls', !!initResponse && initResponse.result.serverInfo.name === 'mnemon-memory' && !initResponse.result.instructions.includes('At the start of every turn'));
+check('MCP server lists exactly 6 consolidated tools', !!listResponse && listResponse.result.tools.length === 6 && listResponse.result.tools.map((t) => t.name).join(',') === 'memory_recall,memory_save,memory_manage,memory_doc,memory_profile,memory_admin', listResponse ? JSON.stringify(listResponse.result.tools.map((t) => t.name)) : 'no response');
+check('MCP memory_admin(status) returns content', !!callResponse && callResponse.result.content[0].text.includes('mirrorDir') && callResponse.result.content[0].text.includes('PERSONA.md'));
+check('MCP memory_admin(verify_heal) responds', !!healResponse && /"checked"|"healed"/.test(healResponse.result.content[0].text));
+check('MCP memory_save + memory_recall roundtrip works', !!saveResponse && saveResponse.result.content[0].text.includes('"added"') && !!recallResponse && recallResponse.result.content[0].text.includes('Consolidated MCP save'));
 check('MCP tool call failure is reported, not thrown', (() => {
   const bad = spawnSync(process.execPath, [path.join(pluginRoot, 'scripts', 'mcp-server.mjs')], {
     input: `${JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'nope' } })}\n`,
@@ -373,6 +433,43 @@ check('MCP tool call failure is reported, not thrown', (() => {
     return false;
   }
 })());
+
+// ---------------------------------------------------- hooks.json & diagnostics
+const hooksJson = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'hooks.json'), 'utf8'));
+check('hooks.json no longer registers PreInvocation hook', hooksJson.mnemon.PreInvocation === undefined && Array.isArray(hooksJson.mnemon.SessionStart) && Array.isArray(hooksJson.mnemon.Stop), JSON.stringify(Object.keys(hooksJson.mnemon)));
+
+const diagSample = path.join(tmp, 'diag-transcript.jsonl');
+fs.writeFileSync(diagSample, [
+  JSON.stringify({ step_index: 1, type: 'USER_INPUT', created_at: '2026-11-14T10:00:00.000Z', content: 'hi' }),
+  JSON.stringify({ step_index: 2, type: 'PLANNER_RESPONSE', created_at: '2026-11-14T10:00:02.000Z', input_tokens: 40000, cache_read_tokens: 0, output_tokens: 200 }),
+  JSON.stringify({ step_index: 3, type: 'PLANNER_RESPONSE', created_at: '2026-11-14T10:00:05.000Z', input_tokens: 1000, cache_read_tokens: 39000, output_tokens: 150 }),
+  JSON.stringify({ step_index: 4, type: 'EPHEMERAL_MESSAGE', created_at: '2026-11-14T10:00:06.000Z', content: 'ephemeral' }),
+  JSON.stringify({ step_index: 5, type: 'PLANNER_RESPONSE', created_at: '2026-11-14T10:00:08.000Z', input_tokens: 120000, cache_read_tokens: 0, output_tokens: 100 }),
+].join('\n') + '\n');
+const diagReport = analyzeTranscriptFile(diagSample, { largeUncachedThreshold: 100000 });
+check('diagnose-transcripts computes cacheRatio, unexpected miss & ttftAvailable=false',
+  diagReport.modelCalls === 3 &&
+  diagReport.callsWithCacheRead === 1 &&
+  diagReport.zeroCacheCalls === 2 &&
+  diagReport.ephemeralSteps === 1 &&
+  diagReport.missBreakdown.coldStart === 1 &&
+  diagReport.missBreakdown.shortGapUnexpected === 1 &&
+  diagReport.largeUncachedCalls === 1 &&
+  diagReport.tokens.uncachedInput === 161000 &&
+  diagReport.tokens.cacheRead === 39000 &&
+  diagReport.measurableDurations.ttftAvailable === false &&
+  diagReport.measurableDurations.prevStepToPlannerDone.count === 3,
+  JSON.stringify(diagReport));
+
+const diagCli = spawnSync(process.execPath, [path.join(pluginRoot, 'scripts', 'diagnose-transcripts.mjs'), '--file', diagSample, '--json'], {
+  encoding: 'utf8',
+  timeout: 15000,
+});
+let diagCliJson = null;
+try { diagCliJson = JSON.parse(diagCli.stdout || '{}'); } catch { diagCliJson = null; }
+check('diagnose-transcripts CLI --json returns valid report JSON',
+  diagCli.status === 0 && !!diagCliJson && diagCliJson.ttftAvailable === false && diagCliJson.count === 1 && Array.isArray(diagCliJson.sessions) && diagCliJson.sessions[0].modelCalls === 3,
+  diagCli.stdout || diagCli.stderr);
 
 fs.rmSync(tmp, { recursive: true, force: true });
 fs.rmSync(mirror, { recursive: true, force: true });

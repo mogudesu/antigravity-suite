@@ -11,7 +11,7 @@ import { splitText, toPlainText, Dedupe } from '../shared/text.mjs';
 import { IMAGE_EXT, downloadToTemp, sanitizeFileName } from '../shared/media.mjs';
 
 export class QQOfficialBot {
-  constructor({ bot, secrets, hub, logger = console, fetchImpl = fetch }) {
+  constructor({ bot, secrets, hub, logger = console, fetchImpl = fetch, seenIds = [], onSeen = null }) {
     this.bot = bot;
     this.secrets = secrets;
     this.hub = hub;
@@ -20,7 +20,7 @@ export class QQOfficialBot {
     this.sdk = null;
     this.status = 'offline';
     this.lastError = '';
-    this.dedupe = new Dedupe();
+    this.dedupe = new Dedupe({ limit: 500, initial: seenIds, onChange: onSeen });
     this.targets = new Map(); // chatId -> replyTarget
   }
 

@@ -16,6 +16,8 @@ const WebSocket = require("ws");
 
 const ROOT = path.join(__dirname, "..");
 const SERVER = path.join(ROOT, "mcp-server", "server.js");
+const { TOOLS } = require(path.join(ROOT, "mcp-server", "tools.js"));
+const TOOL_COUNT = TOOLS.length;
 const PNG_B64 = fs.readFileSync(path.join(ROOT, "extension", "icons", "icon16.png")).toString("base64");
 const PORT = 8799;
 
@@ -195,8 +197,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* ----------------------------------------------------------- 主流程 */
 
 async function main() {
-  section("启动 MCP 服务（stdio）");
-  const client = new McpClient({ AG_BRIDGE_PORT: String(PORT) });
+  section("启动 MCP 服务（stdio · extension 轨测试）");
+  const client = new McpClient({ AG_BRIDGE_PORT: String(PORT), ANTIGRAVITY_BROWSER_MODE: "extension" });
   await sleep(700);
   check("服务已监听桥接端口", client.stderr.some((l) => l.indexOf("桥接已监听") !== -1), client.stderr.join(" | "));
 
@@ -217,7 +219,7 @@ async function main() {
   section("工具清单");
   const list = await client.request("tools/list", {});
   const tools = (list.result && list.result.tools) || [];
-  check("工具数量为 22", tools.length === 22, "实际 " + tools.length);
+  check("工具数量为 " + TOOL_COUNT, tools.length === TOOL_COUNT, "实际 " + tools.length);
   check("每个工具都有 name/description/inputSchema", tools.every((t) => t.name && t.description && t.inputSchema && t.inputSchema.type === "object"));
   const expected = ["browser_launch", "browser_status", "browser_tabs", "browser_open", "browser_history", "browser_snapshot",
     "browser_screenshot", "browser_click", "browser_type", "browser_press", "browser_hover", "browser_scroll",
@@ -361,8 +363,81 @@ async function main() {
   okClient.close();
   b.stop();
 
+  section("安全校验：WS Origin / bridge.list() / 录制目录边界 / Hook 嵌套格式");
+  {
+    const secBridge = new Bridge({ port: 8802, log: () => {} });
+    await secBridge.start();
+
+    // 1. 拒绝任意网页 Origin 跨站劫持
+    const evilWs = await new Promise((resolve) => {
+      const ws = new WebSocket("ws://127.0.0.1:8802/bridge", { origin: "https://evil.example" });
+      ws.on("unexpected-response", (_req, res) => resolve({ rejected: true, status: res.statusCode }));
+      ws.on("error", (err) => resolve({ rejected: true, error: err.message }));
+      ws.on("open", () => { ws.close(); resolve({ rejected: false }); });
+    });
+    check("WS /bridge 拒绝外部 Origin (https://evil.example)", evilWs.rejected === true, JSON.stringify(evilWs));
+
+    // 2. 允许 chrome-extension:// Origin 并验证 list() 保留 id & features
+    const extWs = await new Promise((resolve, reject) => {
+      const ws = new WebSocket("ws://127.0.0.1:8802/bridge", { origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop" });
+      ws.on("open", () => {
+        ws.send(JSON.stringify({ t: "hello", browser: "edge", version: "2.0.0", id: "ext123", features: ["record", "recordReplay"] }));
+      });
+      ws.on("message", (buf) => {
+        const msg = JSON.parse(String(buf));
+        if (msg.t === "welcome") resolve(ws);
+      });
+      ws.on("error", reject);
+    });
+    const list = secBridge.list();
+    check("bridge.list() 保留 extension id 与 features", list.length === 1 && list[0].id === "ext123" && list[0].features.includes("recordReplay"), JSON.stringify(list));
+    extWs.close();
+    secBridge.stop();
+
+    // 3. loadRecording 拒绝目录穿越
+    const { loadRecording } = require(path.join(ROOT, "mcp-server", "recordings.js"));
+    let traversalBlocked = false;
+    try { loadRecording("../../outside-secret.json"); } catch (e) { traversalBlocked = /拒绝/.test(e.message); }
+    check("recordings.js 拒绝目录穿越路径", traversalBlocked);
+
+    // 4. recordings-aware hook Schema 与缓存防抖检查
+    const hookScript = path.join(ROOT, "scripts", "hooks", "recordings-aware.mjs");
+    const fakeRecDir = fs.mkdtempSync(path.join(require("os").tmpdir(), "agbb-hook-"));
+    fs.writeFileSync(path.join(fakeRecDir, "rec-test1.json"), JSON.stringify({
+      recordingId: "rec-test1", title: "测试录制", steps: [{ type: "click" }], stoppedAt: new Date().toISOString()
+    }));
+    const runHook = (ev) => new Promise((resolve) => {
+      const p = spawn(process.execPath, [hookScript], { env: Object.assign({}, process.env, { AG_BRIDGE_RECORDINGS_DIR: fakeRecDir }), stdio: ["pipe", "pipe", "pipe"] });
+      let out = "";
+      p.stdout.on("data", (d) => out += d.toString("utf8"));
+      p.on("exit", () => { try { resolve(JSON.parse(out || "{}")); } catch { resolve({ raw: out }); } });
+      p.stdin.write(JSON.stringify(ev));
+      p.stdin.end();
+    });
+    const ss = await runHook({ hook_event_name: "SessionStart", session_id: "sess-a" });
+    check("recordings-aware 按官方字段 hook_event_name=SessionStart 输出嵌套 systemMessage",
+      ss && Array.isArray(ss.injectSteps) && ss.injectSteps[0] && ss.injectSteps[0].systemMessage && typeof ss.injectSteps[0].systemMessage.systemMessage === "string",
+      JSON.stringify(ss));
+    const ssDup = await runHook({ hook_event_name: "SessionStart", session_id: "sess-a" });
+    check("recordings-aware 同一会话重复 SessionStart 对同一录制去重", Object.keys(ssDup || {}).length === 0, JSON.stringify(ssDup));
+    const piDup = await runHook({ hook_event_name: "PreInvocation", session_id: "sess-a", prompt: "帮我回放刚才录制" });
+    check("recordings-aware 同一会话后续 PreInvocation 对同一录制不重复注入", Object.keys(piDup || {}).length === 0, JSON.stringify(piDup));
+    const subPi = await runHook({ hook_event_name: "PreInvocation", session_id: "sess-b", invocationNum: 3 });
+    check("recordings-aware 普通工具续跑（无新用户输入）跳过 ephemeral 注入", Object.keys(subPi || {}).length === 0, JSON.stringify(subPi));
+    fs.writeFileSync(path.join(fakeRecDir, "rec-test2.json"), JSON.stringify({
+      recordingId: "rec-test2", title: "新录制", steps: [{ type: "click" }], stoppedAt: new Date(Date.now() + 1000).toISOString()
+    }));
+    const piNewRec = await runHook({ hook_event_name: "PreInvocation", session_id: "sess-a", prompt: "帮我看下新录制" });
+    check("recordings-aware 同一会话出现新录制时仍通知一次",
+      piNewRec && Array.isArray(piNewRec.injectSteps) && typeof piNewRec.injectSteps[0].ephemeralMessage === "string" && piNewRec.injectSteps[0].ephemeralMessage.includes("rec-test2"),
+      JSON.stringify(piNewRec));
+    const piNewRecDup = await runHook({ hook_event_name: "PreInvocation", session_id: "sess-a", prompt: "再问一遍回放" });
+    check("recordings-aware 新录制通知后再次提问不再重复注入", Object.keys(piNewRecDup || {}).length === 0, JSON.stringify(piNewRecDup));
+    fs.rmSync(fakeRecDir, { recursive: true, force: true });
+  }
+
   section("端口占用时自动成为 Follower 并中继");
-  const follower = new McpClient({ AG_BRIDGE_PORT: String(PORT) });
+  const follower = new McpClient({ AG_BRIDGE_PORT: String(PORT), ANTIGRAVITY_BROWSER_MODE: "extension" });
   const becameFollower = await waitUntil(() => follower.stderr.some((l) => l.indexOf("Follower 模式") !== -1), 8000);
   check("第二个进程自动进入 Follower 模式", becameFollower, follower.stderr.join(" | "));
   check("Follower 不再报 LISTEN_FAILED / 桥接启动失败",
@@ -372,7 +447,7 @@ async function main() {
   const finit = await follower.request("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "self-test-follower", version: "1" } });
   check("Follower 的 initialize 说明包含 Follower", String(finit.result && finit.result.instructions).indexOf("Follower") !== -1, JSON.stringify(finit.result && finit.result.instructions));
   const flist = await follower.request("tools/list", {});
-  check("Follower tools/list 与 Leader 一致（22 个）", ((flist.result && flist.result.tools) || []).length === 22);
+  check("Follower tools/list 与 Leader 一致（" + TOOL_COUNT + " 个）", ((flist.result && flist.result.tools) || []).length === TOOL_COUNT);
 
   const relayMock = await connectMock({
     browser: "edge",

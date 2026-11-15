@@ -68,20 +68,52 @@ export function stripMentions(text, keys = []) {
   return out.replace(/@_user_\d+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** 简单去重：同一 messageId 只处理一次。 */
+/** 简单去重：同一 messageId 只处理一次（支持注入历史记录与变更持久化回调）。 */
 export class Dedupe {
-  constructor(limit = 500) {
-    this.limit = limit;
+  constructor(limitOrOptions = 500) {
+    const opts =
+      typeof limitOrOptions === 'object' && limitOrOptions !== null
+        ? limitOrOptions
+        : { limit: limitOrOptions };
+    this.limit = Number(opts.limit) > 0 ? Number(opts.limit) : 500;
+    this.onChange = typeof opts.onChange === 'function' ? opts.onChange : null;
     this.seen = new Map();
+    if (Array.isArray(opts.initial)) {
+      const base = Date.now() - opts.initial.length;
+      opts.initial.forEach((entry, index) => {
+        if (typeof entry === 'string' && entry) {
+          this.seen.set(entry, base + index);
+        } else if (entry && typeof entry === 'object' && entry.id !== undefined && entry.id !== null && entry.id !== '') {
+          this.seen.set(String(entry.id), Number(entry.at) || base + index);
+        }
+      });
+      this._trim();
+    }
+  }
+
+  _trim() {
+    if (this.seen.size <= this.limit) return;
+    const sorted = [...this.seen.entries()].sort((a, b) => a[1] - b[1]);
+    for (const [key] of sorted.slice(0, this.seen.size - this.limit)) this.seen.delete(key);
+  }
+
+  export() {
+    return [...this.seen.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(-this.limit)
+      .map(([id, at]) => ({ id, at }));
   }
 
   check(id) {
-    if (!id) return true;
-    if (this.seen.has(id)) return false;
-    this.seen.set(id, Date.now());
-    if (this.seen.size > this.limit) {
-      const sorted = [...this.seen.entries()].sort((a, b) => a[1] - b[1]);
-      for (const [key] of sorted.slice(0, this.seen.size - this.limit)) this.seen.delete(key);
+    if (id === undefined || id === null || id === '') return true;
+    const key = String(id);
+    if (this.seen.has(key)) return false;
+    this.seen.set(key, Date.now());
+    this._trim();
+    try {
+      this.onChange?.(this.export());
+    } catch {
+      /* 去重持久化失败不阻塞消息主链路 */
     }
     return true;
   }

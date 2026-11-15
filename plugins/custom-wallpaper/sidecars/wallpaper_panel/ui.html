@@ -876,6 +876,33 @@
 
   <section class="card">
     <div class="palette-head">
+      <span class="palette-title">右侧阅读与预览</span>
+      <span class="control-value">实时同步</span>
+    </div>
+    <label class="toggle-row"><input type="checkbox" id="rightReadingEnabled"> 右侧阅读增强</label>
+    <div class="control" style="margin-top: 8px">
+      <div class="control-head">
+        <span class="control-label">阅读底色（不透明度）</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;">
+          <input type="color" id="rightReadingBg" value="#140f29" title="阅读底色" style="width:22px;height:18px;padding:0;border:1px solid rgba(255,255,255,0.18);border-radius:4px;background:transparent;cursor:pointer;">
+          <span class="control-value" id="valRightReadingOpacity">94%</span>
+        </span>
+      </div>
+      <input type="range" id="inputRightReadingOpacity" min="50" max="100" step="1" value="94">
+    </div>
+    <div class="control">
+      <div class="control-head">
+        <span class="control-label">代码字号</span>
+        <span class="control-value" id="valRightReadingFontSize">14px</span>
+      </div>
+      <input type="range" id="inputRightReadingFontSize" min="12" max="20" step="1" value="14">
+    </div>
+    <label class="toggle-row"><input type="checkbox" id="videoPreviewEnabled"> 视频预览</label>
+    <div class="control-hint">右侧阅读增强仅作用于右侧文件与代码阅读区，不影响聊天代码与输入框。</div>
+  </section>
+
+  <section class="card">
+    <div class="palette-head">
       <span class="palette-title">星夜引擎</span>
       <span class="control-value">实时同步</span>
     </div>
@@ -966,6 +993,20 @@
       <div class="control-list" id="controlBrowser"><div class="control-row">尚未加载</div></div>
       <div class="control-pre" id="controlBridgeHint">安装扩展后，浏览器桥会接管 8767 端口。</div>
     </section>
+    <section class="card">
+      <div class="palette-head">
+        <span class="palette-title">MCP 缓存瘦身与按需挂载</span>
+        <button type="button" class="ghost-btn" id="btnMcpRefresh">刷新</button>
+      </div>
+      <div class="control-hint">停用当前不用的重型 MCP 与扩展域，可显著压缩首轮常驻前缀并提升提示词缓存命中率；更改后新会话生效。</div>
+      <div class="star-modes" id="mcpProfilePresets" style="margin-bottom:8px">
+        <button type="button" class="star-mode" data-mcp-profile="coding-lean">极简省缓存</button>
+        <button type="button" class="star-mode" data-mcp-profile="video-studio">视频与动效</button>
+        <button type="button" class="star-mode" data-mcp-profile="automation">全端自动化</button>
+        <button type="button" class="star-mode" data-mcp-profile="full">全量恢复</button>
+      </div>
+      <div class="control-list" id="mcpDomainList"><div class="control-row">尚未加载</div></div>
+    </section>
     <div class="status" id="controlStatus">尚未加载</div>
   </div>
 
@@ -993,6 +1034,11 @@
       taskProgressBar: true,
       quickGoalPill: false,
       ambientClock: false,
+      rightReadingEnabled: true,
+      rightReadingBg: '#140f29',
+      rightReadingOpacity: 0.94,
+      rightReadingFontSize: 14,
+      videoPreviewEnabled: true,
       fontPreset: 'editorial-luxe',
       fontScale: 1,
       starEffectMode: 'orbit-meteor',
@@ -1066,9 +1112,17 @@
       $('autoPalette').checked = Boolean(state.autoPalette);
       $('promptSticky').checked = Boolean(state.promptSticky);
       ['deepI18n', 'translateAlerts', 'runningRadar', 'hideRadarWhenIdle', 'quickCopyButton', 'cursorParticles', 'questChime',
-        'telemetryBar', 'telemetryShowCost', 'taskProgressBar', 'quickGoalPill', 'ambientClock'].forEach((key) => {
+        'telemetryBar', 'telemetryShowCost', 'taskProgressBar', 'quickGoalPill', 'ambientClock',
+        'rightReadingEnabled', 'videoPreviewEnabled'].forEach((key) => {
         $(key).checked = Boolean(state[key]);
       });
+      $('rightReadingBg').value = /^#[0-9a-f]{6}$/i.test(String(state.rightReadingBg || '')) ? state.rightReadingBg : '#140f29';
+      const rightReadingAlpha = Math.round(clamp(Number(state.rightReadingOpacity ?? 0.94), 0.5, 1) * 100);
+      $('inputRightReadingOpacity').value = String(rightReadingAlpha);
+      $('valRightReadingOpacity').textContent = rightReadingAlpha + '%';
+      const rightCodeSize = Math.round(clamp(Number(state.rightReadingFontSize ?? 14), 12, 20));
+      $('inputRightReadingFontSize').value = String(rightCodeSize);
+      $('valRightReadingFontSize').textContent = rightCodeSize + 'px';
       document.querySelectorAll('#engineLanguage button').forEach((button) => {
         button.classList.toggle('is-active', button.getAttribute('data-lang') === state.language);
       });
@@ -1091,7 +1145,7 @@
         off: '关闭'
       };
       $('starModeValue').textContent = modeNames[state.starEffectMode] || '星环全开';
-      [$('inputOpacity'), $('inputBlur'), $('inputTint'), $('inputFontScale'), $('inputStarIntensity'), $('inputMeteorFrequency')].forEach(setFill);
+      [$('inputOpacity'), $('inputBlur'), $('inputTint'), $('inputFontScale'), $('inputStarIntensity'), $('inputMeteorFrequency'), $('inputRightReadingOpacity'), $('inputRightReadingFontSize')].forEach(setFill);
       applyPaletteToPanel(state.palette);
       renderPreview();
     }
@@ -1118,6 +1172,11 @@
         taskProgressBar: state.taskProgressBar,
         quickGoalPill: state.quickGoalPill,
         ambientClock: state.ambientClock,
+        rightReadingEnabled: state.rightReadingEnabled,
+        rightReadingBg: state.rightReadingBg,
+        rightReadingOpacity: state.rightReadingOpacity,
+        rightReadingFontSize: state.rightReadingFontSize,
+        videoPreviewEnabled: state.videoPreviewEnabled,
         fontPreset: state.fontPreset,
         fontScale: state.fontScale,
         starEffectMode: state.starEffectMode,
@@ -1127,10 +1186,19 @@
       };
     }
 
+    function authHeaders(extra) {
+      const headers = Object.assign({}, extra || {});
+      if (window.__AG_STARLIGHT_TOKEN__) {
+        headers['X-Starlight-Token'] = window.__AG_STARLIGHT_TOKEN__;
+      }
+      return headers;
+    }
+
     async function post(path, body) {
       const response = await fetch(path, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body || {})
       });
       const data = await response.json().catch(() => ({}));
@@ -1368,12 +1436,38 @@
     });
 
     ['deepI18n', 'translateAlerts', 'runningRadar', 'hideRadarWhenIdle', 'quickCopyButton', 'cursorParticles', 'questChime',
-      'telemetryBar', 'telemetryShowCost', 'taskProgressBar', 'quickGoalPill', 'ambientClock'].forEach((key) => {
+      'telemetryBar', 'telemetryShowCost', 'taskProgressBar', 'quickGoalPill', 'ambientClock',
+      'rightReadingEnabled', 'videoPreviewEnabled'].forEach((key) => {
       $(key).addEventListener('change', (event) => {
         state[key] = event.target.checked;
         commitLive();
         setStatus((event.target.checked ? '已开启：' : '已关闭：') + key, 'ok');
       });
+    });
+
+    bindSlider('inputRightReadingOpacity', (value) => {
+      state.rightReadingOpacity = clamp(value / 100, 0.5, 1);
+      $('valRightReadingOpacity').textContent = Math.round(state.rightReadingOpacity * 100) + '%';
+    });
+
+    bindSlider('inputRightReadingFontSize', (value) => {
+      state.rightReadingFontSize = Math.round(clamp(value, 12, 20));
+      $('valRightReadingFontSize').textContent = state.rightReadingFontSize + 'px';
+    });
+
+    $('rightReadingBg').addEventListener('input', (event) => {
+      const val = String(event.target.value || '').trim();
+      if (/^#[0-9a-f]{6}$/i.test(val)) {
+        state.rightReadingBg = val;
+        pushLive();
+      }
+    });
+    $('rightReadingBg').addEventListener('change', (event) => {
+      const val = String(event.target.value || '').trim();
+      if (/^#[0-9a-f]{6}$/i.test(val)) {
+        state.rightReadingBg = val;
+        persist();
+      }
     });
 
     document.querySelectorAll('.font-card').forEach((card) => {
@@ -1494,7 +1588,8 @@
       setStatus('正在还原默认背景…');
       try {
         await post('/api/restore', {});
-        setStatus('已还原为官方纯色主题', 'ok');
+        $('previewImage').style.opacity = '0';
+        setStatus('已还原为官方纯色主题（点击「应用」可重新启用）', 'ok');
       } catch (error) {
         setStatus('还原失败：' + error.message, 'error');
       }
@@ -1509,13 +1604,12 @@
       }
       const reader = new FileReader();
       reader.onload = async () => {
-        setStatus('正在更换壁纸…');
+        setStatus('正在更换壁纸并重注入…');
         try {
           const data = await post('/api/wallpaper', { dataUrl: reader.result });
           setWallpaper('/wallpaper');
-          setStatus('壁纸已更换，正在重新注入…', 'ok');
-          await post('/api/apply', {});
-          setStatus('壁纸与主题已更新', 'ok');
+          $('previewImage').style.opacity = String(clamp(state.opacity, 0, 1));
+          setStatus('壁纸已保存为独立文件并开始应用（默认壁纸已保留）', 'ok');
           if (data.path) state.wallpaperPath = data.path;
         } catch (error) {
           setStatus('更换壁纸失败：' + error.message, 'error');
@@ -1527,8 +1621,7 @@
 
     async function loadConfig() {
       try {
-        const response = await fetch('/api/config', { cache: 'no-store' });
-        const config = await response.json();
+        const config = await getJSON('/api/config');
         state.opacity = clamp(Number(config.opacity ?? 0.72), 0, 1);
         state.blur = clamp(Number(config.blur ?? 24), 0, 40);
         state.darkTint = clamp(Number(config.darkTint ?? 0.42), 0, 0.9);
@@ -1549,6 +1642,11 @@
         state.taskProgressBar = config.taskProgressBar !== false;
         state.quickGoalPill = config.quickGoalPill === true;
         state.ambientClock = config.ambientClock === true;
+        state.rightReadingEnabled = config.rightReadingEnabled !== false;
+        state.rightReadingBg = /^#[0-9a-f]{6}$/i.test(String(config.rightReadingBg || '')) ? config.rightReadingBg : '#140f29';
+        state.rightReadingOpacity = clamp(Number(config.rightReadingOpacity ?? 0.94), 0.5, 1);
+        state.rightReadingFontSize = Math.round(clamp(Number(config.rightReadingFontSize ?? 14), 12, 20));
+        state.videoPreviewEnabled = config.videoPreviewEnabled !== false;
         state.fontPreset = ['editorial-luxe', 'modern-silk', 'literary-serif', 'starry-game'].includes(config.fontPreset) ? config.fontPreset : 'editorial-luxe';
         state.fontScale = clamp(Number(config.fontScale ?? 1), 0.85, 1.15);
         state.starEffectMode = ['orbit-meteor', 'meteor-stars', 'minimal', 'off'].includes(config.starEffectMode) ? config.starEffectMode : 'orbit-meteor';
@@ -1567,7 +1665,11 @@
     }
 
     async function getJSON(path) {
-      const response = await fetch(path, { cache: 'no-store' });
+      const response = await fetch(path, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: authHeaders()
+      });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
       return data;
@@ -1703,10 +1805,83 @@
         browserHost.appendChild(controlRow('Chrome', browser.chromeExists ? '已检测' : '未检测到', browser.chromeExists ? 'ok' : 'error'));
         $('controlBridgeHint').textContent = '安装扩展：' + (browser.extensionPath || '—') + '\n桥接端口：' + (browser.port || 8767) + '\n扩展安装后调用 browser_launch(browser="edge")，或打开 Edge 扩展弹窗填写端口并重连。';
         $('controlStatus').textContent = '能力状态已刷新';
+        await loadMcpProfiles();
       } catch (error) {
         $('controlStatus').textContent = '读取能力状态失败：' + error.message;
       }
     }
+
+    function renderMcpProfiles(data) {
+      const active = data && data.activeProfile;
+      document.querySelectorAll('#mcpProfilePresets [data-mcp-profile]').forEach((btn) => {
+        btn.classList.toggle('is-active', btn.getAttribute('data-mcp-profile') === active);
+      });
+      const host = $('mcpDomainList');
+      host.innerHTML = '';
+      const domains = Array.isArray(data && data.domains) ? data.domains.filter((d) => d.present) : [];
+      if (!domains.length) {
+        host.appendChild(controlRow('MCP 域', '未检测到重型扩展'));
+        return;
+      }
+      domains.forEach((domain) => {
+        const row = document.createElement('div');
+        row.className = 'control-row';
+        row.style.alignItems = 'center';
+        const info = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = domain.label + ' ';
+        const hint = document.createElement('span');
+        hint.style.color = '#7f7593';
+        hint.textContent = '(' + domain.toolsHint + ')';
+        info.append(title, hint);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ghost-btn';
+        btn.textContent = domain.enabled ? '已挂载 · 停用' : '已停用 · 启用';
+        btn.style.color = domain.enabled ? '#6ee7b7' : '#9a90b0';
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            const res = await post('/api/mcp-profiles', { action: 'toggle', id: domain.id, enabled: !domain.enabled });
+            renderMcpProfiles(res);
+            $('controlStatus').textContent = (domain.enabled ? '已停用 ' : '已启用 ') + domain.label + '（新会话生效）';
+          } catch (error) {
+            $('controlStatus').textContent = '切换失败：' + error.message;
+            btn.disabled = false;
+          }
+        });
+        row.append(info, btn);
+        host.appendChild(row);
+      });
+    }
+
+    async function loadMcpProfiles() {
+      try {
+        const data = await getJSON('/api/mcp-profiles');
+        renderMcpProfiles(data);
+      } catch (error) {
+        const host = $('mcpDomainList');
+        if (host) host.textContent = '读取 MCP 配置失败：' + error.message;
+      }
+    }
+
+    document.querySelectorAll('#mcpProfilePresets [data-mcp-profile]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const profile = btn.getAttribute('data-mcp-profile');
+        btn.disabled = true;
+        try {
+          const data = await post('/api/mcp-profiles', { action: 'apply', profile });
+          renderMcpProfiles(data);
+          $('controlStatus').textContent = '已切换预设：' + profile + '（新会话生效）';
+        } catch (error) {
+          $('controlStatus').textContent = '应用预设失败：' + error.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    $('btnMcpRefresh')?.addEventListener('click', loadMcpProfiles);
 
     let memoryLoaded = false;
     let controlLoaded = false;

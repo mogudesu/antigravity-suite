@@ -6,7 +6,7 @@
  * 3. 为每个目标元素生成与 page-actions.js 100% 兼容的四维多重定位锚点（semantic + selector + fallbacks + bbox）。
  */
 (function () {
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
   var HOST_ID = "agbb-recorder-hud-host";
   var HOST_TAG = "agbb-recorder-hud";
 
@@ -593,28 +593,43 @@
     var root = host.attachShadow({ mode: "open" });
     var style = document.createElement("style");
     style.textContent = [
-      ".hud { background: rgba(11, 15, 27, 0.94); color: #f4f7ff; border: 1px solid rgba(246, 216, 147, 0.38);",
-      "  border-radius: 14px; padding: 10px 13px; box-shadow: 0 12px 32px rgba(0,0,0,0.42);",
-      "  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); min-width: 280px; max-width: 360px;",
-      "  user-select: none; font-size: 12px; line-height: 1.4; }",
+      ".hud { position: relative; overflow: hidden;",
+      "  background: radial-gradient(120% 100% at 100% 0%, rgba(139,92,246,0.20) 0%, transparent 55%),",
+      "    radial-gradient(90% 80% at 0% 100%, rgba(246,216,147,0.09) 0%, transparent 60%),",
+      "    linear-gradient(165deg, rgba(20,23,44,0.94) 0%, rgba(10,13,26,0.96) 100%);",
+      "  color: #f4f7ff; border: 1px solid rgba(246,216,147,0.28); border-radius: 16px; padding: 11px 13px;",
+      "  box-shadow: 0 18px 44px rgba(3,6,16,0.55), inset 0 1px 0 rgba(255,255,255,0.06);",
+      "  backdrop-filter: blur(16px) saturate(1.25); -webkit-backdrop-filter: blur(16px) saturate(1.25);",
+      "  min-width: 300px; max-width: 370px; user-select: none; font-size: 12px; line-height: 1.4; }",
+      ".hud::before { content: \"\"; position: absolute; left: 14px; right: 14px; top: 0; height: 1px;",
+      "  background: linear-gradient(90deg, transparent, rgba(246,216,147,0.6), rgba(196,181,253,0.25), transparent); }",
       ".top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }",
-      ".status { display: flex; align-items: center; gap: 7px; font-weight: 600; }",
-      ".dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4f; box-shadow: 0 0 0 3px rgba(255,77,79,0.25); }",
-      ".dot.paused { background: #f6d893; box-shadow: 0 0 0 3px rgba(246,216,147,0.22); }",
-      ".badge { padding: 1px 7px; border-radius: 999px; background: rgba(246,216,147,0.15); color: #f6d893; font-size: 11px; }",
-      ".summary { margin-top: 6px; color: #9fb3c8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }",
-      ".btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }",
-      "button { all: unset; cursor: pointer; padding: 4px 9px; border-radius: 7px; font-size: 11.5px; font-weight: 500;",
-      "  background: rgba(255,255,255,0.08); color: #e6f0ff; border: 1px solid rgba(255,255,255,0.14); transition: background .15s; }",
-      "button:hover { background: rgba(255,255,255,0.16); }",
-      "button.active { background: rgba(34,227,255,0.2); border-color: #22e3ff; color: #9fe9ff; }",
-      "button.stop { background: rgba(255,77,79,0.2); border-color: rgba(255,77,79,0.45); color: #ffccc7; }",
+      ".status { display: flex; align-items: center; gap: 7px; font-weight: 600; letter-spacing: .01em; }",
+      ".spark { color: #f6d893; font-size: 12px; line-height: 1; text-shadow: 0 0 10px rgba(246,216,147,0.6); }",
+      ".dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4f;",
+      "  box-shadow: 0 0 0 3px rgba(255,77,79,0.22), 0 0 10px rgba(255,77,79,0.55); }",
+      ".dot.paused { background: #f6d893; box-shadow: 0 0 0 3px rgba(246,216,147,0.2), 0 0 10px rgba(246,216,147,0.5); }",
+      ".badge { padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(246,216,147,0.28);",
+      "  background: rgba(246,216,147,0.12); color: #f6d893; font-size: 11px; }",
+      ".summary { margin-top: 7px; color: #a9b7cc; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }",
+      ".btns { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }",
+      "button { all: unset; cursor: pointer; padding: 4px 9px; border-radius: 8px; font-size: 11.5px; font-weight: 500;",
+      "  background: rgba(255,255,255,0.055); color: #dbe6f5; border: 1px solid rgba(255,255,255,0.11);",
+      "  transition: background-color .15s, border-color .15s, color .15s; }",
+      "button:hover { background: rgba(246,216,147,0.12); border-color: rgba(246,216,147,0.3); color: #f7e9c8; }",
+      "button.active { background: rgba(125,211,252,0.16); border-color: rgba(125,211,252,0.6); color: #bfe9ff; }",
+      "button.stop { background: linear-gradient(135deg, rgba(246,216,147,0.92), rgba(229,193,123,0.92));",
+      "  border-color: rgba(246,216,147,0.65); color: #1b1508; font-weight: 600; }",
+      "button.stop:hover { filter: brightness(1.06); background: linear-gradient(135deg, rgba(246,216,147,0.98), rgba(229,193,123,0.98)); }",
       ".note-box { display: none; margin-top: 8px; gap: 6px; }",
       ".note-box.open { display: flex; }",
-      ".note-box input { flex: 1; padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(246,216,147,0.35);",
-      "  background: rgba(0,0,0,0.35); color: #fff; font-size: 11.5px; outline: none; }",
-      ".hover-box { position: fixed; pointer-events: none; border: 2px dashed #22e3ff; background: rgba(34,227,255,0.12);",
-      "  border-radius: 4px; z-index: 2147483646; display: none; }"
+      ".note-box input { flex: 1; padding: 4px 8px; border-radius: 7px; border: 1px solid rgba(246,216,147,0.25);",
+      "  background: rgba(6,9,18,0.6); color: #fff; font-size: 11.5px; outline: none;",
+      "  transition: border-color .15s, box-shadow .15s; }",
+      ".note-box input:focus { border-color: rgba(246,216,147,0.55); box-shadow: 0 0 0 3px rgba(246,216,147,0.08); }",
+      ".hover-box { position: fixed; pointer-events: none; border: 1.5px dashed rgba(246,216,147,0.8);",
+      "  background: rgba(246,216,147,0.08); box-shadow: 0 0 0 1px rgba(125,211,252,0.25), 0 0 18px rgba(246,216,147,0.18);",
+      "  border-radius: 5px; z-index: 2147483646; display: none; }"
     ].join("\n");
 
     var hoverBox = document.createElement("div");
@@ -624,7 +639,7 @@
     wrap.className = "hud";
     wrap.innerHTML = [
       '<div class="top">',
-      '  <div class="status"><span class="dot" id="dot"></span><span id="title">RPA 录制中</span></div>',
+      '  <div class="status"><span class="spark">✦</span><span class="dot" id="dot"></span><span id="title">RPA 录制中</span></div>',
       '  <span class="badge" id="count">0 步</span>',
       '</div>',
       '<div class="summary" id="summary">等待操作…</div>',
